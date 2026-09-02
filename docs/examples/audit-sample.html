@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wanning 审计回放</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --hairline: #e1e0d9;
+  --border: rgba(11, 11, 11, 0.10);
+  --hover: rgba(11, 11, 11, 0.03);
+  --good: #0ca30c;
+  --critical: #d03b3b;
+  --meter-track: #cde2fb;
+  --meter-fill: #2a78d6;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --page: #0d0d0d;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.04);
+    --good: #0ca30c;
+    --critical: #d03b3b;
+    --meter-track: #104281;
+    --meter-fill: #3987e5;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 0 0 12px; }
+.sub { color: var(--ink-2); margin: 0 0 24px; font-size: 13px; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.tile .v { font-size: 26px; font-weight: 650; line-height: 1.2; }
+.tile .l { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 20px; }
+.card ul { margin: 0; padding-left: 20px; }
+.card li { margin: 4px 0; color: var(--ink-2); }
+.card li strong { color: var(--ink); font-weight: 600; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--hairline); padding: 8px 10px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--hairline); padding: 8px 10px; vertical-align: top; }
+tbody tr:hover td { background: var(--hover); }
+th.num, td.num { font-variant-numeric: tabular-nums; }
+code { font-family: var(--mono); font-size: 12px; }
+.hash { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.dim { color: var(--muted); font-size: 12px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.badge .icon { font-size: 12px; }
+.badge.good { color: var(--ink); background: rgba(12, 163, 12, 0.10); }
+.badge.good .icon { color: var(--good); }
+.badge.critical { color: var(--ink); background: rgba(208, 59, 59, 0.10); }
+.badge.critical .icon { color: var(--critical); }
+.badge.neutral { color: var(--ink-2); background: var(--hover); }
+.meter { height: 6px; min-width: 120px; border-radius: 3px; background: var(--meter-track); }
+.meter > i { display: block; height: 100%; border-radius: 3px; background: var(--meter-fill); }
+.empty { color: var(--ink-2); margin: 4px 0; }
+footer { color: var(--muted); font-size: 12px; border-top: 1px solid var(--hairline); padding-top: 14px; margin-top: 8px; }
+footer ul { margin: 0; padding-left: 18px; }
+footer li { margin: 2px 0; }
+@media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style></head>
+<body>
+<main class="wrap">
+<header>
+<h1>Wanning 审计回放</h1>
+<p class="sub">意图层支付闸 · 全程审计时间线 · 只读视图,证据以审计原文为准</p>
+</header>
+<section class="kpis" aria-label="统计">
+<div class="tile"><div class="v">4</div><div class="l">审计行数</div></div>
+<div class="tile"><div class="v">2</div><div class="l">放行笔数</div></div>
+<div class="tile"><div class="v">1</div><div class="l">拒绝笔数</div></div>
+<div class="tile"><div class="v">¥7.00</div><div class="l">累计放行金额</div></div>
+</section>
+<section class="card"><h2>对账</h2>
+<ul>
+<li><strong>完整性链</strong>:4 行全部通过逐行验证(每行 seq=物理行号、prev=前行链值,读侧独立重算);链尾 <code class="hash">0x30ef89232fbfcc89</code></li>
+<li><strong>回放对账</strong>:同一份账回放两遍,状态 hash 一致 (<code class="hash">0xa04f33df28ec4b45</code>);预算台账 1 份委托</li>
+<li><strong>证据声明</strong>:本页是只读视图;每行证据的原文是该 WAL 的对应物理行,核对以原文为准。</li>
+<li><strong>已知边界(诚实声明)</strong>:完整性链抓得住「改历史行 / 删行 / 重排 / 复制」;<em>只改最后一行内容</em>与<em>整体截尾</em>本地验不住(无后继行引用),需外部锚点兜底——授权人侧锚点已落地(2026-09-02 W-23):<code>wanning-demo --anchor-sign &lt;wal&gt; --key &lt;key&gt; --out &lt;anchor.json&gt;</code>,锚定后这两类篡改当场现形。</li>
+</ul>
+</section>
+<section class="card"><h2>预算台账</h2>
+<div class="scroll"><table>
+<thead><tr><th>委托</th><th>授权</th><th class="num">上限</th><th class="num">已用</th><th class="num">剩余</th><th>有效期(UTC)</th><th>状态</th><th>预算用量</th></tr></thead>
+<tbody>
+<tr><td><code>d1</code></td><td>老板 → claude-code</td><td class="num">¥10.00</td><td class="num">¥7.00</td><td class="num">¥3.00</td><td class="num">2023-11-14 22:13:20 → 2023-11-14 23:13:20</td><td>生效中</td><td><div class="meter" role="img" aria-label="已用 ¥7.00 / 上限 ¥10.00"><i style="width:70%"></i></div></td></tr>
+</tbody>
+</table></div>
+</section>
+<section class="card"><h2>事件时间线</h2>
+<div class="scroll"><table>
+<thead><tr><th class="num">#</th><th class="num">时间(UTC)</th><th>事件</th><th>委托</th><th>明细</th><th>结果</th><th>完整性链</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">2023-11-14 22:13:20</td><td><span class="badge neutral"><span class="icon" aria-hidden="true">●</span>注册</span></td><td><code>d1</code></td><td>授权 老板 → claude-code<br><span class="dim">上限 ¥10.00 · 有效期 2023-11-14 22:13:20 → 2023-11-14 23:13:20 · nonce 作用域 agent:claude-code</span></td><td>—</td><td class="num"><span class="hash" title="prev=0">0000000000000000</span> → <span class="hash" title="value=15689165238208900319">d9bb1ca8cdd92cdf</span></td></tr>
+<tr><td class="num">2</td><td class="num">2023-11-14 22:13:20</td><td><span class="badge good"><span class="icon" aria-hidden="true">✓</span>放行</span></td><td><code>d1</code></td><td>¥5.00 · jd:shop-1 · grocery<br><span class="dim">nonce 1 · 闭环腿①:预算内放行,全链走通(下单→扣款→回调结算)</span></td><td>—<br><span class="dim">账本累计 ¥5.00</span></td><td class="num"><span class="hash" title="prev=15689165238208900319">d9bb1ca8cdd92cdf</span> → <span class="hash" title="value=5888170260744839370">51b6fba7c0b720ca</span></td></tr>
+<tr><td class="num">3</td><td class="num">2023-11-14 22:13:20</td><td><span class="badge critical"><span class="icon" aria-hidden="true">✕</span>拒绝</span></td><td><code>d1</code></td><td>¥9.00 · jd:shop-2 · grocery<br><span class="dim">nonce 2 · 闭环腿②:超额请求(累计 ¥14 &gt; 上限 ¥10),闸拒即短路</span></td><td>超出预算上限<br><span class="dim">reason=over_budget</span><br><span class="dim">账本累计 ¥5.00</span></td><td class="num"><span class="hash" title="prev=5888170260744839370">51b6fba7c0b720ca</span> → <span class="hash" title="value=17854750823037670944">f7c8d14668461620</span></td></tr>
+<tr><td class="num">4</td><td class="num">2023-11-14 22:13:20</td><td><span class="badge good"><span class="icon" aria-hidden="true">✓</span>放行</span></td><td><code>d1</code></td><td>¥2.00 · jd:shop-3 · grocery<br><span class="dim">nonce 3 · 闭环腿③:闸放行但渠道侧无候选,中途短路</span></td><td>—<br><span class="dim">账本累计 ¥7.00</span></td><td class="num"><span class="hash" title="prev=17854750823037670944">f7c8d14668461620</span> → <span class="hash" title="value=3526187817472347273">30ef89232fbfcc89</span></td></tr>
+</tbody>
+</table></div>
+</section>
+<footer>
+<ul>
+<li>审计原文:<repo>/target/w33-sample.wal</li>
+<li>生成方式:wanning-demo --export-audit &lt;审计文件&gt; --out &lt;本文件&gt;(离线只读,零网络调用)</li>
+<li>生成时刻(UTC):2026-09-02 10:55:52</li>
+</ul>
+</footer>
+</main>
+</body>
+</html>

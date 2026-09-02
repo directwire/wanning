@@ -1,0 +1,21 @@
+[package]
+name = "wanning-bench"
+description = "Wanning 性能基准:零依赖手写基准,数字全部真实跑出(W-30)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "wanning_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wanning-bench"
+path = "src/main.rs"
+
+[dependencies]
+wanning-core = { path = "../wanning-core" }
+# audit_html 导出基准要用 demo 库面的 build/render/export 管线(W-22)。
+wanning-demo = { path = "../wanning-demo" }

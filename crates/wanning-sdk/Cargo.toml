@@ -1,0 +1,11 @@
+[package]
+name = "wanning-sdk"
+description = "Wanning 支付闸嵌入 SDK:进程内门面,把硬语义变成类型系统强制"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+wanning-core = { path = "../wanning-core" }

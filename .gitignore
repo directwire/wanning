@@ -1,0 +1,18 @@
+# Secrets — NEVER commit (see docs/compliance-redlines.md #5)
+*.env
+*.key
+*.pem
+.env.*
+credentials/
+secrets/
+
+# Build
+target/
+node_modules/
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

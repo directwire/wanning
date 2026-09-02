@@ -1,0 +1,77 @@
+name: release
+
+# Tag push (v*) → build three-platform release binaries + SHA256SUMS.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build --release --target ${{ matrix.target }} -p wanning-demo -p wanning-init -p wanning-mcp
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          dir="wanning-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$dir"
+          for bin in wanning-demo wanning-init wanning-mcp wanning-anchor-verify; do
+            f="target/${{ matrix.target }}/release/$bin"
+            [ -f "$f" ] && cp "$f" "$dir/"
+          done
+          tar czf "$dir.tar.gz" "$dir"
+          sha256sum "$dir.tar.gz" >> SHA256SUMS.txt
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "wanning-${{ github.ref_name }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          foreach ($bin in @("wanning-demo","wanning-init","wanning-mcp","wanning-anchor-verify")) {
+            $f = "target/${{ matrix.target }}/release/$bin.exe"
+            if (Test-Path $f) { Copy-Item $f $dir }
+          }
+          tar czf "$dir.tar.gz" $dir
+          $h = (Get-FileHash "$dir.tar.gz" -Algorithm SHA256).Hash.ToLower()
+          "$h  $dir.tar.gz" | Out-File -Append -Encoding ascii SHA256SUMS.txt
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bins-${{ matrix.target }}
+          path: |
+            *.tar.gz
+            SHA256SUMS.txt
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            SHA256SUMS.txt

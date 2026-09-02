@@ -1,0 +1,13 @@
+[package]
+name = "wanning-init"
+description = "Wanning 插件配置生成器:五平台 MCP 配置一条命令(stdout 默认,--out 显式,绝不覆盖)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]

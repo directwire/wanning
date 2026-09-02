@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "wanning": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "-p",
+        "wanning-mcp",
+        "--",
+        "--wal",
+        "${workspaceFolder}/target/mcp-demo.wal"
+      ]
+    }
+  }
+}

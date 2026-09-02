@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wanning-core",
+    "crates/wanning-demo",
+    "crates/wanning-mcp",
+    "crates/wanning-sdk",
+    "crates/wanning-bench",
+    "crates/wanning-init",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["changshenhan"]
+license = "Apache-2.0"
+repository = "https://github.com/directwire/wanning"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 阻塞式 HTTP 客户端(无 tokio)。仅用于:GLM 决策源 / 开放平台 adapter 的真实路径。
+# 今晚(P0 离线阶段)所有测试打本地 mock server;真实端点必须先过 wanning-demo 的
+# fail-closed 护栏(WANNING_ALLOW_REAL_SPEND + 密钥齐全)。
+ureq = "2"
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,39 @@
+[package]
+name = "wanning-demo"
+description = "Wanning P0 CLI demo:GLM 决策循环 + 闸 + 开放平台/支付通道 adapter(今晚全离线 + 本地 mock)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+# 双 bin 后 `cargo run -p wanning-demo` 需要指认默认 bin(README/docs 既有命令不破)。
+default-run = "wanning-demo"
+
+[dependencies]
+wanning-core = { path = "../wanning-core" }
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+# W-31(A 案,本仓第一个运行时外部加密依赖):审计锚点 v2 的 ed25519 签名/验签。
+# 非对称签名手写不可接受——哈希能手写因为 spec 短、向量密;曲线实现边缘 case
+# 致命。只进本 crate(老板侧工具面):core/闸/MCP/SDK 依赖树零增长。
+ed25519-dalek = "2"
+
+# W-28:签名管线只做报文层,本仓不自带任何加密实现(运行时依赖树零新增)。
+# `rsa`/`sha2`/`rand` 仅测试面:现场生成测试 RSA 密钥对跑 sign/verify 往返
+# (自生成自销毁,绝不真商户密钥,绝不落仓)。见 src/signing.rs 模块文档。
+[dev-dependencies]
+# `sha2` feature = rsa 的可选依赖(隐式 feature,启用 oid),SigningKey/VerifyingKey
+# 的 `new` 构造器需要 digest 的 AssociatedOid bound。
+rsa = { version = "0.9", features = ["sha2"] }
+sha2 = "0.10"
+rand = "0.8"
+
+[[bin]]
+name = "wanning-demo"
+path = "src/main.rs"
+
+# W-31:独立第三方验签 bin——只验 ed25519 锚点 v2,无 --key 选项(公钥随锚点走)。
+[[bin]]
+name = "wanning-anchor-verify"
+path = "src/bin/wanning-anchor-verify.rs"

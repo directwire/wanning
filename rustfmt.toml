@@ -1,0 +1,3 @@
+# Wanning rustfmt 配置:刻意保持 rustfmt 默认风格(见 TASK W-01「rustfmt.toml 默认即可」),
+# 仅显式固定 edition,避免 fmt 结果随工具链默认 edition 漂移。
+edition = "2021"
