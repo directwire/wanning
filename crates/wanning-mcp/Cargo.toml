@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-wanning-core = { path = "../wanning-core" }
+wanning-core = { path = "../wanning-core", version = "0.1.0" }
 serde_json.workspace = true
 
 [dev-dependencies]
