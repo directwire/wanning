@@ -12,7 +12,17 @@
 //!          "delegation_id":"d1","intent":{...},"budget_after_cents":500}}
 //! {"seq":4,"prev":77...,   "rec":{"kind":"decide","ts":1700000003,"decision":"deny",
 //!          "delegation_id":"d1","intent":{...},"reason":"over_budget","budget_after_cents":500}}
+//! {"seq":5,"prev":55...,   "rec":{"kind":"pending","ts":1700000004,
+//!          "pending_id":"p-...","delegation_id":"d1","intent":{...},
+//!          "approved_amount_cents":400,"expires_ts":1700000904}}
+//! {"seq":6,"prev":33...,   "rec":{"kind":"confirm","ts":1700000010,
+//!          "pending_id":"p-...","amount_cents":400,"proof":"TRADE-..."}}
+//! {"seq":7,"prev":22...,   "rec":{"kind":"terminal","ts":1700000010,
+//!          "pending_id":"p-...","outcome":"completed"}}
 //! ```
+//!
+//! ⑤pending/confirm/terminal 三种行 = W-53a 人在环待支付(第一形态):一行一段
+//! 事件链,语义由 [`crate::pending::PendingLedger`] 统一应用(实时与回放同一套)。
 //!
 //! `budget_after_cents` = 该决策落地后的**累计消费**(分),不是剩余预算;
 //! 剩余预算 = 委托 cap − 此值。选累计消费而不是剩余:对未知委托也能给出明确定义(0),
@@ -49,6 +59,7 @@ use crate::delegation::Delegation;
 use crate::error::CoreError;
 use crate::gate::DenyReason;
 use crate::intent::SpendIntent;
+use crate::pending::PendingOutcome;
 
 /// 决策结论(WAL 行内的小写蛇形字符串)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +89,33 @@ pub enum WalRecord {
         /// 该决策落地后的累计消费(分),见模块注释。
         budget_after_cents: u64,
     },
+    /// W-53a ③待支付:闸放行(pending_pay 档位)后开的待支付单(审批额 + TTL)。
+    Pending {
+        ts: u64,
+        pending_id: String,
+        delegation_id: String,
+        /// ①意图原样入账(与触发放行的 Decide 行同一意图,回放可对账)。
+        intent: SpendIntent,
+        /// ②审批额(= 意图额;与 Pending 行自身的 intent.amount_cents 一致)。
+        approved_amount_cents: u64,
+        /// 过期时刻(开单时刻 + TTL;半开窗口)。
+        expires_ts: u64,
+    },
+    /// W-53a ④人确认:人的显式动作(CLI 人工面),幂等,带支付凭证。
+    Confirm {
+        ts: u64,
+        pending_id: String,
+        /// 确认额(必须等于该单的审批额——金额一致钉)。
+        amount_cents: u64,
+        /// 支付凭证(交易号;空凭证在状态层就被拒,不落行)。
+        proof: String,
+    },
+    /// W-53a ⑤终态:完成 / TTL 过期作废。
+    Terminal {
+        ts: u64,
+        pending_id: String,
+        outcome: PendingOutcome,
+    },
 }
 
 impl WalRecord {
@@ -86,7 +124,10 @@ impl WalRecord {
         match self {
             WalRecord::RegisterDelegation { ts, .. }
             | WalRecord::Revoke { ts, .. }
-            | WalRecord::Decide { ts, .. } => *ts,
+            | WalRecord::Decide { ts, .. }
+            | WalRecord::Pending { ts, .. }
+            | WalRecord::Confirm { ts, .. }
+            | WalRecord::Terminal { ts, .. } => *ts,
         }
     }
 
@@ -96,6 +137,9 @@ impl WalRecord {
             WalRecord::RegisterDelegation { .. } => "register_delegation",
             WalRecord::Revoke { .. } => "revoke",
             WalRecord::Decide { .. } => "decide",
+            WalRecord::Pending { .. } => "pending",
+            WalRecord::Confirm { .. } => "confirm",
+            WalRecord::Terminal { .. } => "terminal",
         }
     }
 }

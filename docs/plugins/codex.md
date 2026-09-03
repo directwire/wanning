@@ -69,6 +69,14 @@ startup_timeout_sec = 30          # cargo 冷编译超过默认 10s,放宽
 |---|---|---|
 | `wanning_gate_evaluate` | 提交消费意图,闸判定(allow/deny + reason) | 判定与拒绝**都落审计**(WAL) |
 | `wanning_audit_tail` | 读审计尾 | 只读 |
+| `wanning_pending_status` | 只读查询支付形态与待支付单状态(W-53) | 只读,零写入零网络 |
+
+**人在环为默认旅程(W-53)**:默认档位 `pending_pay` 下,`wanning_gate_evaluate`
+放行即开待支付单(单号 `p-…`,带审批额与 15 分钟 TTL,确认前零资金流);AI 侧止步于
+提交意图与 `wanning_pending_status` 只读查询——**确认不在工具面上**(AI 不能确认
+AI 自己的支付,工具面连 confirm 字样都不出现,契约测试钉死)。人付完款在终端跑
+`wanning confirm <单号> --amount <同额元> --proof <交易号>` 把支付凭证入账
+(金额一致 / 幂等 / TTL 三钉 fail-closed,被拒的确认一行都不落账)。
 
 - **没有撤销工具、没有授权工具**(agent 能撤销就能复活,能授权就能自授权)——
   授权/撤销走所有者侧(见 `docs/examples/sdk-embed.md` 与白皮书 §4)。

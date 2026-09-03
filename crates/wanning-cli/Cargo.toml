@@ -20,6 +20,13 @@ wanning-core.workspace = true
 wanning-demo.workspace = true
 wanning-init.workspace = true
 serde_json.workspace = true
+# W-52 channel-test L1「签名自测」:把自测报文的 `sign`(base64)解回字节再验。
+# base64 已在依赖树里(ureq/wanning-demo 传递),这里只声明直用,零新增 crate。
+base64 = "0.22"
 
 [dev-dependencies]
 wanning-mcp.workspace = true
+# W-52 测试面:现场生成 2048 位测试 RSA 密钥对(W-28 同款纪律——自生成自销毁,
+# 绝不真商户密钥,绝不落仓),喂 channel-test 的 env 槽位跑 L1 往返。
+rand = "0.8"
+rsa = { version = "0.9", features = ["sha2"] }

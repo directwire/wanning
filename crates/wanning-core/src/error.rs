@@ -41,6 +41,9 @@ pub enum CoreError {
     /// 当前 WAL 与合法锚点不符:整体截尾(行数不足)或被锚定的前缀内容被改。
     /// 这是 W-21 完整性链已知边界(尾行篡改/截尾本地验不住)的抓法。
     AnchorMismatch(String),
+    /// 人在环待支付被拒(W-53a:三钉 / 单号不存在 / 凭证缺失 / 单号重复)。
+    /// fail-closed:被拒的确认一行都不落账。
+    Pending(crate::pending::PendingError),
 }
 
 impl fmt::Display for CoreError {
@@ -83,6 +86,7 @@ impl fmt::Display for CoreError {
             CoreError::AnchorMismatch(m) => {
                 write!(f, "审计日志与所有者锚点不符——审计被动过(fail-closed): {m}")
             }
+            CoreError::Pending(e) => write!(f, "人在环待支付被拒(fail-closed): {e}"),
         }
     }
 }

@@ -29,6 +29,43 @@ Agent 建造者(Claude Code / Kimi / Trae / WorkBuddy / ANAI / 任何框架)
 - 支付宝/微信**不集成我们**——免密协议是用户跟平台签的,闸通过的支付
   对管道就是一笔普通支付
 
+## 个人零开户旅程(第一形态:人在环待支付,W-53 默认档位)
+
+个人用户**零开户、零商户号、零签约**就能用满整条链——支付形态分两档,默认档
+`pending_pay`(人在环待支付):AI 把单开在「待支付」,你本人付钱确认;免密代扣
+是平台接入侧的第二形态,见下文「平台接入」章节。
+
+```
+装闸(wanning init --install + doctor)
+   ▼
+AI 申请(wanning_gate_evaluate;超额/重放/撤销先被闸拒)
+   ▼
+闸放行 → 开待支付单(单号 p-…,带审批额 + 15 分钟 TTL;确认前零资金流)
+   ▼
+你按指纹付钱(发生在你自己的手机/渠道上,闸不碰这笔钱)
+   ▼
+wanning confirm <单号> --amount <同额元> --proof <交易号>   ← 人的显式动作,只在 CLI
+   ▼
+账本回放(wanning audit:意图/审批/待支付/确认/终态 五段逐行可对)
+```
+
+三道钉 fail-closed,被拒的确认**一行都不落账**:
+
+1. **金额一致**:`--amount` 必须照审批额敲,分文不差——AI 审批 400、确认单 500 = 拒
+   (防夹带,这是「限制 AI」的本体语义);
+2. **幂等**:同一单只能确认一次,二次确认 = 拒;
+3. **TTL**:待支付单 15 分钟过期作废(默认,`--pending-ttl-secs` 可调),确认过期单 = 拒。
+
+确认动作**只存在于 CLI 人工面**:`wanning-mcp` 的工具面连 `confirm` 字样都不出现
+(契约测试钉死)——AI 不能确认 AI 自己的支付,否则人在环空转。AI 侧能做的止步于
+提交意图与只读查询(`wanning_pending_status`)。
+
+诚实边界:闸侧五段事件链(意图/审批/待支付/确认/终态)通道无关,本砖全做实、
+全落审计账本可回放;「把单备到平台待支付状态」那半截按通道资质渐进——京东 VOP/
+美团开放平台均企业入驻,个人实际靠宿主端(浏览器插件/手机网页会话)由用户本人
+确认,官方 API only 红线不变。待支付单是**账本里的一行状态,不是通道请求**:
+零网络、零外联、零通道 API。
+
 ## 合规红线(全文见 `docs/compliance-redlines.md`,执行无豁免)
 
 1. 禁止任何资金沉淀/归集/转付(二清 = 刑事红线);钱永远用户直付商户
@@ -80,9 +117,13 @@ wanning init --platform claude-code --install   # 或 codex / kimi / trae / work
 wanning doctor --platform claude-code           # ② 体检:二进制+配置语义+真握手
 #   (隔离临时账本,零模型零外网零真实消费)+账本目录可写+真实消费就绪度+版本一致
 #   六项检查,每项 ❌ 带 ✗ 修复命令;全绿再重启你的编码工具
-# 重启你的编码工具 → 闸的两件工具(wanning_gate_evaluate / wanning_audit_tail)出现
+# 重启你的编码工具 → 闸的三件工具(wanning_gate_evaluate / wanning_audit_tail /
+#   wanning_pending_status 只读)出现
 # 让 agent 试一笔超额消费 → 应被拒(reason=over_budget,账本不动)
-wanning audit                                   # ③ 看账本:行数/判定/链尾/预算台账
+# 让 agent 试一笔预算内消费 → 闸放行并开待支付单(单号 p-…,等人确认)
+wanning confirm <单号> --amount <同额元> --proof <交易号>   # ④ 人在环确认:你付完款,
+#   把支付凭证入账(金额必须与审批额一致;同一单只能确认一次;过期单拒)
+wanning audit                                   # ⑤ 看账本:行数/判定/链尾/预算台账
 wanning ui                                      # 本地仪表盘:127.0.0.1 随机端口,零 JS 自动刷新
 ```
 
@@ -135,12 +176,10 @@ codex 主配置是 TOML 文本面,fail-closed 拒装给 `--out` 人工指引。�
 收拢单一入口 `wanning`——`wanning init --platform <名>`(八平台同上,缺 wanning-mcp
 时报错给安装指引;`--install` 直写见上)、`wanning doctor --platform <名>`(W-51b
 挂载面体检六项:二进制/配置语义/**真握手**/账本目录可写/真实消费就绪度/版本一致性,
-每项 ❌ 带 ✗ 修复命令;零模型零外网零真实消费)、`wanning audit [<账本>] [--out <report.html>]`(读账本汇总:
-行数/判定/链尾/预算台账;坏账 fail-closed 拒读;`--out` 同时导出审计回放页)、
-
-**统一 CLI 入口**(W-43a):`cargo install wanning-cli`(或仓内 `cargo run -p wanning-cli -- …`)
-收拢单一入口 `wanning`——`wanning init --platform <名>`(八平台同上,缺 wanning-mcp
-时报错给安装指引)、`wanning audit [<账本>] [--out <report.html>]`(读账本汇总:
+每项 ❌ 带 ✗ 修复命令;零模型零外网零真实消费)、`wanning confirm <单号> --amount <元>
+--proof <交易号> [--wal <账本>]`(W-53b 人在环确认,唯一一张人工确认脸,见上文
+个人零开户旅程)、`wanning channel-test --channel <名>`(W-52 渠道钥匙验证,见下节)、
+`wanning audit [<账本>] [--out <report.html>]`(读账本汇总:
 行数/判定/链尾/预算台账;坏账 fail-closed 拒读;`--out` 同时导出审计回放页)、
 `wanning demo --scenario <name>`、`wanning anchor-verify --anchor <a.json> --wal <账本>`
 (第三方零密钥验签)——后两个与 `wanning-demo` 走**同一段 lib 实现**,真实消费护栏
@@ -219,6 +258,42 @@ cargo run -p wanning-demo --bin wanning-anchor-verify -- \
   `ed25519-dalek`(本仓第一个运行时外部加密依赖,只进 demo 工具面,
   core/闸/MCP/SDK 依赖树零增长——曲线手写不可接受,哈希能手写是因为 spec 短向量密)
 
+## 平台接入(第二形式:免密代扣,平台侧)
+
+个人零开户旅程(上文)用不到本节;这一侧是**接入平台**的免密代扣形态——闸放行
+即消费落地(账本语义 `--pay-mode auto_debit`),商户号、实签验证、报文模板都属
+平台接入方,与个人用户无关。通道半边的两块已备:
+
+- **官方报文模板**(W-50):支付宝签名/验签/网关/字段全按公开文档直核填实
+  (协议内扣款没有协议号绝不发报文,fail-closed 到构建层;调研在档);
+  开户后只剩「实签验证」一步。
+- **渠道钥匙验证**(`wanning channel-test`,W-52):所有者在支付平台侧的商户密钥
+  能不能用,一条命令分级验证,**绝不跳级**:
+
+```bash
+wanning channel-test --channel alipay            # L0+L1:零网络。env 注入密钥自签自验,
+                                                 # 密钥格式/「不是一对」当场现形
+wanning channel-test --channel alipay --real     # 到 L2:真网关零资金移动探针
+                                                 # (alipay.trade.precreate 预下单,探针
+                                                 #  不扫码;需护栏 env + TTY 交互确认)
+```
+
+- **L0 环境齐套**(零网络):逐槽位报 已设/未设(值绝不回显),缺项给 ✗ 修复指引;
+- **L1 签名自测**(零网络):env 商户私钥真签一笔自测报文 + 支付宝公钥验回,
+  「私钥/公钥不是一对」当场现形——所有真实路径之前的免费保险;
+- **L2 网关探针**(真网关,**零资金移动**):只生成二维码,买家不扫码即无资金流,
+  探针不扫码;回答「服务器认不认签名」(W-50「待实签」清单第一格),业务权限被拒
+  也是已验签响应,同样回答问题。**过 ≠ 能扣款**;
+- **L3 协议内 0.01 元真实扣款**(默认不做):仅所有者本人显式 `--real-spend` +
+  协议号在 env + 专属确认文案才走(四重明示)。
+
+三重明示 fail-closed 缺一即拒:① env `WANNING_ALLOW_REAL_SPEND=1`(W-07 同一
+开关,过账本不豁免护栏);② `--real` 显式(缺省 = 只到 L1,零网络);③ TTY 交互
+确认(非交互环境一律拒——防脚本/agent 无人值守误触)。探针意图照落独立审计账本
+(缺省 `~/.wanning/channel-test.jsonl`,每日预算 100 分,用尽即明天再探);密钥只从
+env 现取现用,绝不落盘、绝不 echo、绝不进取证档(取证档落 `--evidence` 目录,
+app_id/sign 打码)。京东/微信/美团渠道如实标不支持(原因见 `--help`),不硬做。
+
 ## MCP server(P1 前置骨架,已可 stdio 对话)
 
 ```bash
@@ -226,9 +301,13 @@ cargo run -p wanning-mcp -- --wal /tmp/wanning-audit.jsonl   # --wal 必填:没�
 ```
 
 stdio 上的 MCP server(协议版本 2025-06-18,method/字段/错误码按官方 spec 核对)。
-**零网络、零真实消费**;工具面只有两个:`wanning_gate_evaluate`(闸评估,
-判定与拒绝都落审计 WAL)、`wanning_audit_tail`(读审计尾部)。
-撤销不设工具——那是所有者侧动作,agent 无权自撤销。
+**零网络、零真实消费**;工具面只有三个:`wanning_gate_evaluate`(闸评估,
+判定与拒绝都落审计 WAL;默认档位放行即开待支付单)、`wanning_audit_tail`(读审计尾部)、
+`wanning_pending_status`(只读查询支付形态与待支付单状态)。
+撤销不设工具——那是所有者侧动作,agent 无权自撤销;**确认也不设工具**(W-53b)——
+AI 不能确认 AI 自己的支付,人在环的确认走所有者 CLI `wanning confirm`,工具面连
+confirm 字样都不出现(契约测试钉死)。启动旗标 `--pay-mode pending_pay|auto_debit|manual`
+与 `--pending-ttl-secs`(默认 900 秒)控制支付形态档位。
 审计 WAL 逐行带**完整性链**(`seq`/`prev`):历史行被改/删/重排/复制,重启验链
 fail-closed 拒启(实测证据在档(W-21 节))。
 
@@ -284,6 +363,6 @@ gate.self_check()?;                        // 验链+回放对账,三条口径�
 | P0 | CLI 闭环 demo:GLM 决策 + 闸 + 支付宝免密/京东开放平台真实小额下单(四卖点实测) | **离线闭环完成**(四卖点+回放对账+护栏/adapter mock 全测试;**预算策略层落地** W-27:速率/类目/商户/时段四维确定性策略;**性能基线** W-30:判定 ~1.2M/s、WAL 追加 ~0.33M 行/s、回放 ~0.42M 行/s,`docs/benchmarks.md`);真实小额下单待账户开通——**支付宝官方报文模板已按公开文档填实**(W-50:签名/验签/网关/字段全直核 + ANAI 实战双源交叉,调研在档;开户后只剩「实签验证」一步);**京东 VOP 公开面复核**(W-50:支付 4 接口全字段/错误码表直核,签名算法公开面查不到,保持契约占位,调研在档含开户后人工核清单)。**产品化首砖+W-43a/W-43b**:统一
 CLI 入口 `wanning`(init/audit/demo/anchor-verify/ui,默认账本 ~/.wanning)、
 本地只读仪表盘 `wanning ui` |
-| P1 | 闸做成 **MCP server**——Claude Code / Kimi / Trae 等真实平台真插 | 骨架+协议边界加固完成;**Claude Code 真插实测通过**(2026-09-02,W-19);**Codex 配置面免登录实测 + 插件页落地**(W-35,`docs/plugins/codex.md`,生成的 TOML 已实证可启动闸;会话级待 OpenAI 登录);**Kimi Code CLI 挂法+闸往返本机实测**(W-40:0.39.1 无 `kimi mcp` 子命令→`.kimi-code/mcp.json` 挂法,隔离 `KIMI_CODE_HOME` 下真二进制完成 allow/replay/over_budget 三判定落 WAL,模型侧本地 mock,真实模型会话复证待所有者放行烧额度——登录凭证 2026-08-30 已在档,`kimi login` 大概率可省(W-42 修正),`docs/plugins/kimi.md`);**WorkBuddy 调研破冰**(W-37:腾讯 AI 办公工作台,支持 MCP,`.workbuddy/mcp.json`,生成器已入矩阵,真插待桌面端);Trae 实测被 GUI 挡;**DeepSeek Harness 接入**(W-44:Cordis overlay patch 生成器分支 + 插件页,本机 dsh 0.1.0-rc.7 `--dump-config --patch` 实测接受,会话级待所有者放行);**OpenClaw + Hermes 接入**(W-45:两宿主原生支持 MCP,`openclaw mcp set`/`hermes mcp add` 生成器分支 + 插件页,真宿主隔离实测——hermes **全链路**:挂载 2/2 工具发现 + one-shot agent 回合经 `tool_call` 间接层 → allow 400 落 WAL、同 nonce replay 拒;openclaw 配置面 + mock 模型注册绿,agent 回合 **W-47 收口**:静默退出根因查明(缺 `-m`/缺会话选择器/cwd 扫描税),隔离 mock 真回合工具现身 `wanning__*`、allow/replay 落 WAL、链连续);**八平台配置生成器**(`wanning-init`,W-36/W-44/W-45);**三命令流收口**(W-51:`init --install` 直写宿主配置消手动贴 + `wanning doctor` 六项体检消「通没通自己试」,装完即用) |
+| P1 | 闸做成 **MCP server**——Claude Code / Kimi / Trae 等真实平台真插 | 骨架+协议边界加固完成;**Claude Code 真插实测通过**(2026-09-02,W-19);**Codex 配置面免登录实测 + 插件页落地**(W-35,`docs/plugins/codex.md`,生成的 TOML 已实证可启动闸;会话级待 OpenAI 登录);**Kimi Code CLI 挂法+闸往返本机实测**(W-40:0.39.1 无 `kimi mcp` 子命令→`.kimi-code/mcp.json` 挂法,隔离 `KIMI_CODE_HOME` 下真二进制完成 allow/replay/over_budget 三判定落 WAL,模型侧本地 mock,真实模型会话复证待所有者放行烧额度——登录凭证 2026-08-30 已在档,`kimi login` 大概率可省(W-42 修正),`docs/plugins/kimi.md`);**WorkBuddy 调研破冰**(W-37:腾讯 AI 办公工作台,支持 MCP,`.workbuddy/mcp.json`,生成器已入矩阵,真插待桌面端);Trae 实测被 GUI 挡;**DeepSeek Harness 接入**(W-44:Cordis overlay patch 生成器分支 + 插件页,本机 dsh 0.1.0-rc.7 `--dump-config --patch` 实测接受,会话级待所有者放行);**OpenClaw + Hermes 接入**(W-45:两宿主原生支持 MCP,`openclaw mcp set`/`hermes mcp add` 生成器分支 + 插件页,真宿主隔离实测——hermes **全链路**:挂载 2/2 工具发现 + one-shot agent 回合经 `tool_call` 间接层 → allow 400 落 WAL、同 nonce replay 拒;openclaw 配置面 + mock 模型注册绿,agent 回合 **W-47 收口**:静默退出根因查明(缺 `-m`/缺会话选择器/cwd 扫描税),隔离 mock 真回合工具现身 `wanning__*`、allow/replay 落 WAL、链连续);**八平台配置生成器**(`wanning-init`,W-36/W-44/W-45);**三命令流收口**(W-51:`init --install` 直写宿主配置消手动贴 + `wanning doctor` 六项体检消「通没通自己试」,装完即用);**人在环待支付 = 第一形态**(W-53:支付形态分层 `pending_pay`(默认)/`auto_debit`/`manual`,默认档闸放行即开待支付单,五段事件链全落 WAL 可逐段回放,三钉(金额一致/幂等/TTL)fail-closed,确认只在 CLI 人工面 `wanning confirm`,MCP 工具面连 confirm 字样都零命中) |
 | P2 | SDK + 微信通道 + 对外样板 | **SDK 完成**(W-25);审计回放页(W-22)/所有者侧锚点(W-23,**v2 ed25519 第三方零密钥可验** W-31,独立 bin `wanning-anchor-verify`)/微信调研(W-24)+ **微信 adapter 骨架**(W-27,W-24 直核字段落代码;接入待账户开通);**美团 adapter 契约占位**(W-39,W-38 结论=查不到用户侧免密/代扣 API,管线照建契约体留空);**四渠道×四工具矩阵 mock 备妥**(W-39,矩阵在档);剩对外样板录像 |
 | P3 | 标准输出:拿协议谈开放平台/银行 | **白皮书第一稿完成**(2026-09-02,W-26,在档);拿协议谈待所有者 |

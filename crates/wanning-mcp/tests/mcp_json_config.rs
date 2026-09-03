@@ -156,7 +156,8 @@ fn configured_command_drives_the_real_server() {
     let mut proc = McpProc::spawn(&spawn_args);
     proc.handshake();
 
-    // 工具面契约:评估 + 审计,就这两个(支付/撤销永不进 MCP 面)。
+    // 工具面契约:评估 + 审计 + 待支付查询(只读),就这三个
+    // (支付/撤销/确认永不进 MCP 面——AI 不能确认 AI 自己的支付,W-53b)。
     proc.send(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let value = proc.response();
     let names: Vec<&str> = value["result"]["tools"]
@@ -165,9 +166,16 @@ fn configured_command_drives_the_real_server() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, vec!["wanning_gate_evaluate", "wanning_audit_tail"]);
+    assert_eq!(
+        names,
+        vec![
+            "wanning_gate_evaluate",
+            "wanning_audit_tail",
+            "wanning_pending_status"
+        ]
+    );
 
-    // 一笔放行 + 一笔重放拒绝:配置驱动的 server 是真闸,不是空壳。
+    // 一笔放行(人在环:开待支付单)+ 一笔重放拒绝:配置驱动的 server 是真闸,不是空壳。
     proc.send(&json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": { "name": "wanning_gate_evaluate", "arguments": {
@@ -177,7 +185,16 @@ fn configured_command_drives_the_real_server() {
     let value = proc.response();
     assert_eq!(value["result"]["isError"], false, "{value}");
     assert_eq!(value["result"]["structuredContent"]["decision"], "allow");
-    assert_eq!(value["result"]["structuredContent"]["wal_line"], 2);
+    assert_eq!(
+        value["result"]["structuredContent"]["wal_line"], 3,
+        "行1=注册 行2=判定 行3=待支付(默认档位 pending_pay)"
+    );
+    assert!(
+        value["result"]["structuredContent"]["pending"]["pending_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("p-")
+    );
 
     proc.send(&json!({
         "jsonrpc": "2.0", "id": 4, "method": "tools/call",

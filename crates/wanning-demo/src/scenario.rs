@@ -13,6 +13,7 @@ use wanning_core::delegation::Delegation;
 use wanning_core::error::CoreError;
 use wanning_core::gate::{DenyReason, GateDecision};
 use wanning_core::intent::SpendIntent;
+use wanning_core::pending::PendingOutcome;
 use wanning_core::state::WanningState;
 use wanning_core::wal::{read_records, WalDecision, WalRecord};
 
@@ -226,6 +227,33 @@ pub(crate) fn render_record(record: &WalRecord) -> String {
             reason
                 .map(|r| format!(" | reason={}({})", serde_reason(&r), deny_reason_zh(&r)))
                 .unwrap_or_default(),
+        ),
+        WalRecord::Pending {
+            pending_id,
+            intent,
+            approved_amount_cents,
+            expires_ts,
+            ..
+        } => format!(
+            "pending   | 单 {pending_id} nonce={} 审批={}分 merchant={} | 窗口至 {expires_ts}(等人确认,零资金流)",
+            intent.nonce, approved_amount_cents, intent.merchant_id,
+        ),
+        WalRecord::Confirm {
+            pending_id,
+            amount_cents,
+            proof,
+            ..
+        } => format!(
+            "confirm   | 单 {pending_id} 确认={amount_cents}分 凭证={proof}(人的显式动作)"
+        ),
+        WalRecord::Terminal {
+            pending_id, outcome, ..
+        } => format!(
+            "terminal  | 单 {pending_id} → {}",
+            match outcome {
+                PendingOutcome::Completed => "完成",
+                PendingOutcome::ExpiredVoid => "过期作废",
+            }
         ),
     }
 }

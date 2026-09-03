@@ -24,15 +24,18 @@ percent-encoding = "2.3"
 # 非对称签名手写不可接受——哈希能手写因为 spec 短、向量密;曲线实现边缘 case
 # 致命。只进本 crate(所有者侧工具面):core/闸/MCP/SDK 依赖树零增长。
 ed25519-dalek = "2"
-
-# W-28:签名管线只做报文层,本仓不自带任何加密实现(运行时依赖树零新增)。
-# `rsa`/`sha2`/`rand` 仅测试面:现场生成测试 RSA 密钥对跑 sign/verify 往返
-# (自生成自销毁,绝不真商户密钥,绝不落仓)。见 src/signing.rs 模块文档。
-[dev-dependencies]
-# `sha2` feature = rsa 的可选依赖(隐式 feature,启用 oid),SigningKey/VerifyingKey
-# 的 `new` 构造器需要 digest 的 AssociatedOid bound。
+# W-52:RSA2 签名/验签的 env 注入实现(`EnvRsaSigner`/`EnvRsaVerifier`,见
+# src/signing.rs)——channel-test L1「签名自测」要拿 env 里的真密钥真签真验。
+# W-28 混合案的修正:rsa/sha2 从 dev-deps 转正为**本 crate 运行时依赖**(W-31
+# 同款先例与边界:非对称签名手写不可接受;只进所有者侧工具面,core/闸/MCP/SDK
+# 依赖树零增长)。`sha2` feature = rsa 的可选依赖(隐式 feature,启用 oid),
+# SigningKey/VerifyingKey 的 `new` 构造器需要 digest 的 AssociatedOid bound。
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
+
+[dev-dependencies]
+# W-28 起 rand 仅测试面:现场生成测试 RSA 密钥对(自生成自销毁,绝不真商户
+# 密钥,绝不落仓)。
 rand = "0.8"
 
 [[bin]]

@@ -1,9 +1,10 @@
-//! 闸的完整运行状态([`WanningState`]):闸 + 审计日志 + 时钟。
+//! 闸的完整运行状态([`WanningState`]):闸 + 审计日志 + 待支付台账 + 时钟。
 //!
-//! 这是 demo / 未来 MCP server 实际持有的对象。职责只有一条:
+//! 这是 demo / MCP server 实际持有的对象。职责只有一条:
 //! **每一条决策都必须先落审计,再落账本**(write-ahead)——审计写不进去,这笔消费
 //! 就不能发生。这样「崩溃后的世界」只会比实时状态**更严格**(多扣不会出现,少扣可能),
-//! 永远不会出现「花了钱却查无此账」。
+//! 永远不会出现「花了钱却查无此账」。待支付(W-53a)走同一纪律:确认/作废的每一行
+//! 都先落审计再改台账,被拒的确认一行都不落。
 //!
 //! 回放([`WanningState::replay`]):从 WAL 逐行重建状态,用记录里的 ts 驱动注入时钟,
 //! 并**重算每一条决策**与记录对账;任何不一致立即 fail-closed 报错。回放是确定性的:
@@ -17,13 +18,18 @@ use crate::delegation::Delegation;
 use crate::error::CoreError;
 use crate::gate::{Gate, GateDecision};
 use crate::intent::SpendIntent;
+use crate::pending::{
+    PendingError, PendingLedger, PendingOrder, PendingOutcome, PendingReceipt, PendingState,
+};
 use crate::wal::{fnv1a_64, Wal, WalDecision, WalRecord};
 
-/// 闸 + 审计日志 + 时钟的运行时状态。
+/// 闸 + 审计日志 + 待支付台账 + 时钟的运行时状态。
 #[derive(Debug)]
 pub struct WanningState {
     gate: Gate,
     wal: Option<Wal>,
+    /// 人在环待支付台账(W-53a;实时态与回放态共用同一套应用逻辑)。
+    pendings: PendingLedger,
 }
 
 impl WanningState {
@@ -32,6 +38,7 @@ impl WanningState {
         Self {
             gate: Gate::new(clock),
             wal: None,
+            pendings: PendingLedger::new(),
         }
     }
 
@@ -40,6 +47,7 @@ impl WanningState {
         Ok(Self {
             gate: Gate::new(clock),
             wal: Some(Wal::open(wal_path)?),
+            pendings: PendingLedger::new(),
         })
     }
 
@@ -70,14 +78,32 @@ impl WanningState {
         // 先开 WAL(不存在则创建;append-only,绝不截断)——空文件是合法起点。
         let wal = Wal::open(path)?;
         let resumed = Self::replay(path)?;
+        let WanningState {
+            gate,
+            wal: _,
+            pendings,
+        } = resumed;
         Ok(Self {
-            gate: resumed.gate.with_clock(Arc::new(SystemClock)),
+            gate: gate.with_clock(Arc::new(SystemClock)),
             wal: Some(wal),
+            // 待支付单跨重启存活:人确认的常常是「上一个进程」开的单(W-53a)。
+            pendings,
         })
     }
 
     pub fn gate(&self) -> &Gate {
         &self.gate
+    }
+
+    /// 待支付台账(只读)。AI 侧查询自己 pending 状态只到这一层为止(W-53b:
+    /// 确认永远不在 AI 工具面上,人在环才不是空转)。
+    pub fn pendings(&self) -> &PendingLedger {
+        &self.pendings
+    }
+
+    /// 按单号查一笔待支付单。
+    pub fn pending(&self, pending_id: &str) -> Option<&PendingOrder> {
+        self.pendings.get(pending_id)
     }
 
     pub fn wal_path(&self) -> Option<&Path> {
@@ -146,6 +172,188 @@ impl WanningState {
         // 若各读各的,跨秒边界时实时侧速率窗口时刻会漂离 WAL 记录 ts,回放对账
         // 会把诚实账本误判为不一致——单次读是回放可重建的前提。
         let ts = self.now();
+        self.evaluate_record_commit(intent, ts)
+    }
+
+    /// 人在环待支付(pending_pay 档位,W-53a)的判定入口:
+    /// ①意图 + ②审批(与 [`WanningState::decide`] 同一段)→ ③开待支付单。
+    ///
+    /// - `ttl_secs == 0` 或过期时刻溢出 → 在**任何落账之前**拒绝(API 误用零审计
+    ///   噪音,W-25 先例;否则会出现「判定已记账却开不出单」的中间世界);
+    /// - 拒绝 → 正常落 Decide 行,不开单(第二返回值 `None`);
+    /// - 放行 → 落 Decide 行、扣预算、落 Pending 行、台账开单,返回
+    ///   [`PendingReceipt`](crate::pending::PendingReceipt)(单号 + 审批额 +
+    ///   过期时刻 + 待支付行号)。
+    ///
+    /// 预算在**开单时**扣(与闸「放行即记账」同一语义):等人确认期间这笔额度
+    /// 已被占用,并发多单不可能合力突破硬上限;确认不二次扣,过期作废不退
+    /// (作废是账本事实,退了才给「反复开单洗预算」留门)。
+    pub fn decide_opening_pending(
+        &mut self,
+        intent: &SpendIntent,
+        ttl_secs: u64,
+    ) -> Result<(GateDecision, Option<PendingReceipt>), CoreError> {
+        if ttl_secs == 0 {
+            return Err(CoreError::Pending(PendingError::InvalidTtl { ttl_secs }));
+        }
+        let ts = self.now();
+        // 过期时刻先算:溢出与 TTL 一样,必须在任何落账之前 fail-closed。
+        let expires_ts = ts.checked_add(ttl_secs).ok_or_else(|| {
+            CoreError::LedgerOverflow(format!(
+                "待支付过期时刻溢出: 开单时刻 {ts} + TTL {ttl_secs} 秒"
+            ))
+        })?;
+        let verdict = self.evaluate_record_commit(intent, ts)?;
+        let GateDecision::Allow { budget_after_cents } = verdict else {
+            return Ok((verdict, None));
+        };
+        let pending_id = self.fresh_pending_id(&intent.delegation_id, intent.nonce, ts);
+        let pending_record = WalRecord::Pending {
+            ts,
+            pending_id: pending_id.clone(),
+            delegation_id: intent.delegation_id.clone(),
+            intent: intent.clone(),
+            approved_amount_cents: intent.amount_cents,
+            expires_ts,
+        };
+        let wal_line = match self.wal.as_mut() {
+            Some(wal) => Some(wal.append(&pending_record)?),
+            None => None,
+        };
+        self.pendings.apply_open(PendingOrder {
+            pending_id: pending_id.clone(),
+            delegation_id: intent.delegation_id.clone(),
+            intent: intent.clone(),
+            approved_amount_cents: intent.amount_cents,
+            created_ts: ts,
+            expires_ts,
+            state: PendingState::Open,
+            proof: None,
+            confirmed_ts: None,
+        })?;
+        Ok((
+            GateDecision::Allow { budget_after_cents },
+            Some(PendingReceipt {
+                pending_id,
+                approved_amount_cents: intent.amount_cents,
+                expires_ts,
+                wal_line,
+            }),
+        ))
+    }
+
+    /// ④人确认(`wanning confirm` 人工面;**不在 AI 工具面上**,W-53b)。
+    ///
+    /// 三钉在 [`PendingLedger::check_confirm`]:金额一致 → 幂等 → TTL。被拒的
+    /// 确认**一行都不落**;唯一的例外是过期确认——作废本身是账本事实,先落一行
+    /// `Terminal{ExpiredVoid}` 把单作废,再拒(第二次确认就是普通的幂等拒)。
+    /// 成功 = 落 Confirm 行 + 落 Terminal{Completed} 行,返回完成态的单。
+    pub fn confirm_pending(
+        &mut self,
+        pending_id: &str,
+        amount_cents: u64,
+        proof: &str,
+    ) -> Result<PendingOrder, CoreError> {
+        if proof.trim().is_empty() {
+            return Err(CoreError::Pending(PendingError::EmptyProof));
+        }
+        let ts = self.now();
+        // 先纯检查(零变更):三钉不过就一行都不写。
+        let checked = self.pendings.check_confirm(pending_id, amount_cents, ts);
+        if let Err(err @ PendingError::Expired { .. }) = checked {
+            // TTL 钉的作废半边:作废是账本事实,落一行终态再拒。
+            let record = WalRecord::Terminal {
+                ts,
+                pending_id: pending_id.to_string(),
+                outcome: PendingOutcome::ExpiredVoid,
+            };
+            if let Some(wal) = self.wal.as_mut() {
+                wal.append(&record)?;
+            }
+            self.pendings.apply_void(pending_id, ts)?;
+            return Err(CoreError::Pending(err));
+        }
+        checked.map_err(CoreError::Pending)?;
+        let confirm_record = WalRecord::Confirm {
+            ts,
+            pending_id: pending_id.to_string(),
+            amount_cents,
+            proof: proof.to_string(),
+        };
+        if let Some(wal) = self.wal.as_mut() {
+            wal.append(&confirm_record)?;
+        }
+        self.pendings
+            .apply_confirm(pending_id, amount_cents, proof, ts)?;
+        let terminal_record = WalRecord::Terminal {
+            ts,
+            pending_id: pending_id.to_string(),
+            outcome: PendingOutcome::Completed,
+        };
+        if let Some(wal) = self.wal.as_mut() {
+            wal.append(&terminal_record)?;
+        }
+        self.pendings.apply_complete(pending_id)?;
+        Ok(self
+            .pendings
+            .get(pending_id)
+            .cloned()
+            .expect("确认过的单必在台账"))
+    }
+
+    /// 批量物化 TTL 过期:扫出台账里所有**已过期且仍 `Open`** 的单,逐张落
+    /// `Terminal{ExpiredVoid}` 行并作废,返回作废的单号(按单号有序)。
+    ///
+    /// 幂等:已作废/已确认/已完成的单不在扫描范围,再扫一遍返回空。审计展示或
+    /// 定时任务用它把「过期作废」从隐式(确认时才撞上)变成显式账本事实。
+    pub fn void_expired_pendings(&mut self) -> Result<Vec<String>, CoreError> {
+        let ts = self.now();
+        let expired: Vec<String> = self
+            .pendings
+            .iter()
+            .filter(|(_, order)| order.state == PendingState::Open && ts >= order.expires_ts)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for pending_id in &expired {
+            let record = WalRecord::Terminal {
+                ts,
+                pending_id: pending_id.clone(),
+                outcome: PendingOutcome::ExpiredVoid,
+            };
+            if let Some(wal) = self.wal.as_mut() {
+                wal.append(&record)?;
+            }
+            self.pendings.apply_void(pending_id, ts)?;
+        }
+        Ok(expired)
+    }
+
+    /// 新单号:`p-` + FNV-1a64(委托 id ‖ nonce ‖ 开单时刻 ‖ 盐)。
+    /// 确定性派生(同输入同单号,回放可复算形状),盐自增兜底同刻连开的碰撞。
+    fn fresh_pending_id(&self, delegation_id: &str, nonce: u64, ts: u64) -> String {
+        let mut salt = 0u8;
+        loop {
+            let mut bytes = Vec::with_capacity(delegation_id.len() + 17);
+            bytes.extend_from_slice(delegation_id.as_bytes());
+            bytes.extend_from_slice(&nonce.to_le_bytes());
+            bytes.extend_from_slice(&ts.to_le_bytes());
+            bytes.push(salt);
+            let candidate = format!("p-{:016x}", fnv1a_64(&bytes));
+            if !self.pendings.contains_key(&candidate) {
+                return candidate;
+            }
+            salt = salt.wrapping_add(1);
+        }
+    }
+
+    /// ①意图 + ②审批共用的判定段:evaluate → 写 Decide 行 → 放行则 commit。
+    /// [`WanningState::decide`] 与 [`WanningState::decide_opening_pending`] 都走
+    /// 这一段,判定面绝不两套。
+    fn evaluate_record_commit(
+        &mut self,
+        intent: &SpendIntent,
+        ts: u64,
+    ) -> Result<GateDecision, CoreError> {
         let verdict = self.gate.evaluate_at(intent, ts);
         let spent_after = match verdict {
             // Allow 携带的就是「扣减后的累计消费」,直接取用,不重算。
@@ -182,16 +390,24 @@ impl WanningState {
     ///
     /// 覆盖:委托集、账本、撤销集、nonce 登记集、策略运行时状态(W-27 速率
     /// 窗口时刻与类目台账——随 commit 演化的状态必须进指纹,否则「速率窗口跨
-    /// 重启被洗掉」这类回放缺失对账不出来);全部按有序迭代序列化,
+    /// 重启被洗掉」这类回放缺失对账不出来)、待支付台账(W-53a:单的状态演化
+    /// 必须进指纹,否则「重启洗掉确认」对账不出来);全部按有序迭代序列化,
     /// 因此「同一份 WAL 回放两遍 hash 必相同」由构造保证。
+    ///
+    /// `pendings` 键只在台账非空时出现——老账本(无人待支付)的指纹与 W-53
+    /// 之前逐字节相同,不制造一次全体哈希漂移。
     pub fn state_hash(&self) -> u64 {
-        let snapshot = serde_json::json!({
+        let mut snapshot = serde_json::json!({
             "delegations": self.gate.delegations().collect::<Vec<_>>(),
             "spent_cents": self.gate.ledger().entries().collect::<Vec<_>>(),
             "revoked": self.gate.revocations().iter().collect::<Vec<_>>(),
             "used_nonces": self.gate.replay_registry().iter().collect::<Vec<_>>(),
             "policy_states": self.gate.policy_states().collect::<Vec<_>>(),
         });
+        if !self.pendings.is_empty() {
+            snapshot["pendings"] = serde_json::to_value(self.pendings.iter().collect::<Vec<_>>())
+                .expect("待支付台账可序列化");
+        }
         fnv1a_64(snapshot.to_string().as_bytes())
     }
 
@@ -210,6 +426,9 @@ impl WanningState {
         let records = crate::wal::read_verified(wal_path)?.records;
         let clock = MockClock::new(0);
         let mut state = WanningState::new(Arc::new(clock.clone()));
+        // 最近一次放行的意图(①②审批的回放锚):③待支付行必须挂在这上面,
+        // 没有放行就没有待支付(W-53a 语义对账)。拒绝不改锚——锚只认放行。
+        let mut last_allow: Option<SpendIntent> = None;
         for (line_no, record) in records {
             let record_ts = record.ts();
             clock.set_now(record_ts);
@@ -262,6 +481,7 @@ impl WanningState {
                                     message: format!("重放扣减失败: {e}"),
                                 }
                             })?;
+                            last_allow = Some(intent);
                         }
                         (
                             GateDecision::Deny { reason: recomputed },
@@ -279,6 +499,90 @@ impl WanningState {
                             });
                         }
                     }
+                }
+                WalRecord::Pending {
+                    pending_id,
+                    delegation_id,
+                    intent: row_intent,
+                    approved_amount_cents,
+                    expires_ts,
+                    ..
+                } => {
+                    // ③待支付行的四道语义闸:锚在最近一次放行的**同一意图**上
+                    // (防无放行开单 / 换意图夹带)、行自洽(审批额 = 意图额、
+                    // 委托一致、过期时刻真的在开单时刻之后)、单号与意图首次出现。
+                    let anchored_on_allow = last_allow.as_ref() == Some(&row_intent);
+                    let self_consistent = row_intent.amount_cents == approved_amount_cents
+                        && row_intent.delegation_id == delegation_id
+                        && expires_ts > record_ts;
+                    let first_open = !state
+                        .pendings
+                        .contains_intent(&delegation_id, row_intent.nonce);
+                    if !anchored_on_allow || !self_consistent || !first_open {
+                        return Err(CoreError::WalMismatch {
+                            line: line_no,
+                            message: format!(
+                                "待支付行与放行记录不一致:锚定放行 {anchored_on_allow} / \
+                                 行自洽 {self_consistent} / 单号与意图首次出现 {first_open}"
+                            ),
+                        });
+                    }
+                    state
+                        .pendings
+                        .apply_open(PendingOrder {
+                            pending_id,
+                            delegation_id,
+                            intent: row_intent,
+                            approved_amount_cents,
+                            created_ts: record_ts,
+                            expires_ts,
+                            state: PendingState::Open,
+                            proof: None,
+                            confirmed_ts: None,
+                        })
+                        .map_err(|e| CoreError::WalMismatch {
+                            line: line_no,
+                            message: format!("重放开单失败: {e}"),
+                        })?;
+                }
+                WalRecord::Confirm {
+                    pending_id,
+                    amount_cents,
+                    proof,
+                    ..
+                } => {
+                    // ④确认行走实时侧同一套三钉;空凭证的确认行实时侧写不出来,
+                    // 回放侧同样拒(实时侧先拒、根本不落行,这里只是对账兜底)。
+                    if proof.trim().is_empty() {
+                        return Err(CoreError::WalMismatch {
+                            line: line_no,
+                            message: "确认行的支付凭证为空(实时侧写不出这种行)".to_string(),
+                        });
+                    }
+                    state
+                        .pendings
+                        .apply_confirm(&pending_id, amount_cents, &proof, record_ts)
+                        .map_err(|e| CoreError::WalMismatch {
+                            line: line_no,
+                            message: format!("重放确认失败: {e}"),
+                        })?;
+                }
+                WalRecord::Terminal {
+                    pending_id,
+                    outcome,
+                    ..
+                } => {
+                    // ⑤终态行由同一套状态机核:完成必须已确认,作废必须真过期。
+                    let applied = match outcome {
+                        PendingOutcome::Completed => state.pendings.apply_complete(&pending_id),
+                        PendingOutcome::ExpiredVoid => {
+                            state.pendings.apply_void(&pending_id, record_ts)
+                        }
+                    };
+                    applied.map_err(|e| CoreError::WalMismatch {
+                        line: line_no,
+                        message: format!("重放终态失败: {e}"),
+                    })?;
                 }
             }
         }

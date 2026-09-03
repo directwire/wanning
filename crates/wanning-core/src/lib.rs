@@ -30,7 +30,8 @@
 //! | [`revocation`] | 撤销集合(kill switch) |
 //! | [`replay`] | nonce 防重放登记 |
 //! | [`wal`] | 审计日志(append-only JSONL)+ 回放重建 |
-//! | [`state`] | 运行时状态:闸 + 审计(write-ahead)+ 时钟;`replay` 重建 |
+//! | [`pending`] | 人在环待支付(W-53a,第一形态):五段事件链 + 三钉 + 档位 |
+//! | [`state`] | 运行时状态:闸 + 审计(write-ahead)+ 待支付台账 + 时钟;`replay` 重建 |
 //! | [`clock`] | 可注入时钟(测试不 sleep,过期语义可控) |
 //! | [`paths`] | 默认路径(W-43a):`~/.wanning` 解析与 WAL 目录自动创建 |
 //! | [`sha256`] | SHA-256(FIPS 180-4,零依赖手写;W-23 锚点的底层哈希) |
@@ -47,6 +48,7 @@ pub mod error;
 pub mod gate;
 pub mod intent;
 pub mod paths;
+pub mod pending;
 pub mod policy;
 pub mod replay;
 pub mod revocation;

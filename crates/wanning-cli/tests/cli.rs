@@ -78,6 +78,9 @@ fn dummy_bin(dir: &Path) -> PathBuf {
 /// 10 分放行)。判定笔数可调:audit 的篡改测试要 ≥2 笔才有「中间行」可改
 /// ——W-21 已知边界:只改**尾行**完整性链本地验不住(无后继行引用),
 /// 那一半由锚点层负责(见 anchor-verify 测试)。
+/// 档位用 `Manual`(纯闸,不开待支付单):本构造器喂的是 audit/anchor 测试,
+/// 要的是 W-53 之前的「注册 + 判定」两行形状;人在环事件链由 pending/confirm
+/// 测试自建账本,不混在这里。
 fn build_wal(tag: &str, decisions: usize) -> PathBuf {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let wal = temp_dir("wal").join(format!(
@@ -86,7 +89,15 @@ fn build_wal(tag: &str, decisions: usize) -> PathBuf {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::SeqCst)
     ));
-    let mut server = McpServer::new_full(&wal, 1_000, 24, 10).expect("启动应成功");
+    let mut server = McpServer::new_full(
+        &wal,
+        1_000,
+        24,
+        10,
+        wanning_mcp::PayMode::Manual,
+        wanning_mcp::DEFAULT_PENDING_TTL_SECS,
+    )
+    .expect("启动应成功");
     server
         .handle_line(
             r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"w43-cli-tests","version":"0.0.0"}}}"#,
@@ -522,4 +533,258 @@ fn new_user_path_init_to_gate_decision() {
     assert!(wal.is_file(), "判定应落默认账本 {}", wal.display());
     let lines = fs::read_to_string(&wal).expect("读账本").lines().count();
     assert!(lines >= 3, "注册 + 两笔判定至少 3 行,实际 {lines}");
+}
+
+// ── W-53b:人在环确认(wanning confirm;只在这张 CLI 人工脸上) ─────────────
+
+/// 开一份带**未确认待支付单**的账本(默认档位 = pending_pay):进程内
+/// McpServer 放行 400 分开单,取回单号后 drop(放单写者锁,CLI 子进程才进得来)。
+/// 返回 (账本路径, 单号)。开单时的账本形状:行1=注册 行2=判定 行3=待支付。
+fn build_pending_wal(tag: &str) -> (PathBuf, String) {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let wal = temp_dir("pending-wal").join(format!(
+        "{}-{}-{}.jsonl",
+        tag,
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ));
+    let mut server = McpServer::new(&wal).expect("启动应成功(默认档位 = 人在环)");
+    server
+        .handle_line(
+            r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"w53-cli-tests","version":"0.0.0"}}}"#,
+        )
+        .expect("initialize 必有响应");
+    server.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let response = server
+        .handle_line(
+            &json!({
+                "jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":"wanning_gate_evaluate","arguments":{
+                    "delegation_id":"demo-d1","nonce":1,"amount_cents":400,
+                    "merchant_id":"jd:shop-1","category":"grocery","memo":"W-53 人在环"}}
+            })
+            .to_string(),
+        )
+        .expect("tools/call 必有响应");
+    let value: Value = serde_json::from_str(&response).expect("响应是合法 JSON");
+    assert_eq!(
+        value["result"]["structuredContent"]["decision"], "allow",
+        "{value}"
+    );
+    let pending_id = value["result"]["structuredContent"]["pending"]["pending_id"]
+        .as_str()
+        .expect("pending_pay 放行必开单,回执带单号")
+        .to_string();
+    drop(server);
+    (wal, pending_id)
+}
+
+fn wal_line_count(wal: &Path) -> usize {
+    fs::read_to_string(wal).expect("读账本").lines().count()
+}
+
+#[test]
+fn confirm_without_args_is_a_usage_error() {
+    let (code, _stdout, stderr) = run(&["confirm"], &[]);
+    assert_eq!(code, 2, "缺单号 = 用法错(退出码 2): {stderr}");
+    assert!(stderr.contains("单号"), "{stderr}");
+}
+
+#[test]
+fn confirm_requires_amount_and_proof() {
+    let (wal, pending_id) = build_pending_wal("confirm-missing-flags");
+    let wal_str = wal.to_string_lossy().to_string();
+    let (code, _stdout, stderr) = run(
+        &[
+            "confirm",
+            &pending_id,
+            "--wal",
+            &wal_str,
+            "--amount",
+            "4.00",
+        ],
+        &[],
+    );
+    assert_eq!(code, 2, "缺 --proof = 用法错: {stderr}");
+    assert!(stderr.contains("--proof"), "{stderr}");
+
+    let (code, _stdout, stderr) = run(
+        &["confirm", &pending_id, "--wal", &wal_str, "--proof", "T-1"],
+        &[],
+    );
+    assert_eq!(code, 2, "缺 --amount = 用法错: {stderr}");
+    assert!(stderr.contains("--amount"), "{stderr}");
+    assert_eq!(wal_line_count(&wal), 3, "用法错零落账");
+}
+
+#[test]
+fn confirm_rejects_ambiguous_amounts_before_touching_the_ledger() {
+    let (wal, pending_id) = build_pending_wal("confirm-bad-amount");
+    let wal_str = wal.to_string_lossy().to_string();
+    for bad in ["4.005", " 4.00", "-4.00", "abc"] {
+        let (code, _stdout, stderr) = run(
+            &[
+                "confirm",
+                &pending_id,
+                "--wal",
+                &wal_str,
+                "--amount",
+                bad,
+                "--proof",
+                "T-1",
+            ],
+            &[],
+        );
+        assert_eq!(code, 2, "金额 {bad:?} 歧义/非法 = 用法错(这是钱): {stderr}");
+    }
+    assert_eq!(wal_line_count(&wal), 3, "坏金额一个字节都不落账");
+}
+
+#[test]
+fn confirm_happy_path_writes_confirm_and_terminal_rows_and_audits_clean() {
+    let (wal, pending_id) = build_pending_wal("confirm-happy");
+    let wal_str = wal.to_string_lossy().to_string();
+    let (code, stdout, stderr) = run(
+        &[
+            "confirm",
+            &pending_id,
+            "--wal",
+            &wal_str,
+            "--amount",
+            "4.00",
+            "--proof",
+            "TRADE-20260903-0001",
+        ],
+        &[],
+    );
+    assert_eq!(code, 0, "确认成功退出码 0: {stderr}");
+    assert!(stdout.contains(&pending_id), "回显单号: {stdout}");
+    assert!(stdout.contains("TRADE-20260903-0001"), "回显凭证: {stdout}");
+
+    // 五段事件链一行不缺:注册 / 判定 / 待支付 / 确认 / 终态。
+    // (行内字段断言归 core 的 pending_flow;这里只钉 CLI 面落账的链形状。)
+    let lines = fs::read_to_string(&wal).expect("读账本");
+    let kinds: Vec<String> = lines
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| v["rec"]["kind"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "register_delegation".to_string(),
+            "decide".to_string(),
+            "pending".to_string(),
+            "confirm".to_string(),
+            "terminal".to_string(),
+        ],
+        "五段链: {kinds:?}"
+    );
+
+    // 审计面吃这份新账必须照常干净(回放对账两遍 + HTML 导出)。
+    let out = temp_dir("confirm-audit").join("report.html");
+    let (code, stdout, stderr) = run(&["audit", &wal_str, "--out", &out.to_string_lossy()], &[]);
+    assert_eq!(code, 0, "五段链的账必须过审计面: {stderr}");
+    assert!(out.is_file());
+    assert!(
+        stdout.contains("人在环:待支付 1 / 人确认 1(完成 1 / 过期作废 0)"),
+        "stdout 汇总要收 W-53 三段统计(与 HTML KPI 同源): {stdout}"
+    );
+}
+
+#[test]
+fn confirm_amount_mismatch_is_rejected_and_writes_nothing() {
+    let (wal, pending_id) = build_pending_wal("confirm-mismatch");
+    let wal_str = wal.to_string_lossy().to_string();
+    let (code, _stdout, stderr) = run(
+        &[
+            "confirm",
+            &pending_id,
+            "--wal",
+            &wal_str,
+            "--amount",
+            "5.00",
+            "--proof",
+            "T-1",
+        ],
+        &[],
+    );
+    assert_eq!(code, 1, "审批 400 确认 500 = 运行失败(退出码 1): {stderr}");
+    assert!(
+        stderr.contains("金额不一致"),
+        "防夹带报错要人能读懂: {stderr}"
+    );
+    assert_eq!(wal_line_count(&wal), 3, "被拒的确认一行都不落");
+}
+
+#[test]
+fn confirm_is_idempotent_second_call_is_rejected() {
+    let (wal, pending_id) = build_pending_wal("confirm-twice");
+    let wal_str = wal.to_string_lossy().to_string();
+    let (code, _stdout, stderr) = run(
+        &[
+            "confirm",
+            &pending_id,
+            "--wal",
+            &wal_str,
+            "--amount",
+            "4.00",
+            "--proof",
+            "T-1",
+        ],
+        &[],
+    );
+    assert_eq!(code, 0, "第一次确认成功: {stderr}");
+
+    let (code, _stdout, stderr) = run(
+        &[
+            "confirm",
+            &pending_id,
+            "--wal",
+            &wal_str,
+            "--amount",
+            "4.00",
+            "--proof",
+            "T-2",
+        ],
+        &[],
+    );
+    assert_eq!(code, 1, "同一单只能确认一次(幂等): {stderr}");
+    assert!(stderr.contains("不能再次确认"), "{stderr}");
+    assert_eq!(wal_line_count(&wal), 5, "二次确认零落账");
+}
+
+#[test]
+fn confirm_unknown_pending_id_is_rejected() {
+    let (wal, _pending_id) = build_pending_wal("confirm-unknown");
+    let wal_str = wal.to_string_lossy().to_string();
+    let (code, _stdout, stderr) = run(
+        &[
+            "confirm",
+            "p-no-such-order",
+            "--wal",
+            &wal_str,
+            "--amount",
+            "4.00",
+            "--proof",
+            "T-1",
+        ],
+        &[],
+    );
+    assert_eq!(code, 1, "未知单号 = 运行失败: {stderr}");
+    assert!(stderr.contains("待支付单不存在"), "{stderr}");
+    assert_eq!(wal_line_count(&wal), 3);
+}
+
+#[test]
+fn confirm_never_appears_on_the_mcp_tool_face() {
+    // W-53b 契约的人工面另一半:CLI 有 confirm,MCP 工具面连 confirm 字样都
+    // 不得出现(AI 不能确认 AI 自己的支付)。工具面钉子归 wanning-mcp 的
+    // 契约测试,这里钉 CLI 面:confirm 在统一入口的分发表里,退出码纪律一致。
+    let (code, stdout, _stderr) = run(&["--help"], &[]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("wanning confirm"),
+        "统一入口帮助要指出人在环确认这张人工脸: {stdout}"
+    );
 }

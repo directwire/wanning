@@ -17,6 +17,11 @@
   写前备份,`--dry-run` 预览;codex 拒装给人工指引)+ `wanning doctor` 挂载面体检
   (二进制/配置语义/真握手/账本目录可写/真实消费就绪度/版本一致性,每项 ❌ 带
   修复命令;真握手用隔离临时账本)
+- 人在环待支付(W-53,第一形态,个人默认零开户):支付形态档位 `pending_pay`
+  (默认)/ `auto_debit` / `manual`;默认档闸放行即开待支付单,五段事件链(意图/
+  审批/待支付/确认/终态)全落 WAL 可逐段回放,三钉(金额一致/幂等/TTL)fail-closed;
+  确认只在 CLI 人工面 `wanning confirm`(MCP 工具面连 confirm 字样零命中),AI 侧
+  只读查询走 `wanning_pending_status`
 - 通道 adapter(京东/支付宝/微信/美团):mock 契约层备妥
 - 性能基准、审计回放 HTML、嵌入 SDK、CI 三步门禁(fmt/clippy/test)
 

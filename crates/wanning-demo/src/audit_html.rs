@@ -23,6 +23,7 @@
 use std::path::Path;
 
 use wanning_core::error::CoreError;
+use wanning_core::pending::PendingOutcome;
 use wanning_core::state::WanningState;
 use wanning_core::wal::{read_verified, WalChainLink, WalDecision, WalRecord};
 
@@ -50,6 +51,14 @@ pub struct EventCounts {
     pub revoke: u64,
     pub allow: u64,
     pub deny: u64,
+    /// ③待支付行(W-53a 人在环:开出的单数)。
+    pub pending: u64,
+    /// ④人确认行数。
+    pub confirm: u64,
+    /// ⑤终态行 = 完成。
+    pub terminal_completed: u64,
+    /// ⑤终态行 = 过期作废。
+    pub terminal_voided: u64,
 }
 
 /// 一份委托的预算台账(来自回放态,不是来自各行的拼接)。
@@ -123,6 +132,12 @@ pub fn build_report(wal_path: impl AsRef<Path>) -> Result<AuditReport, CoreError
                         })?;
                 }
                 WalDecision::Deny => counts.deny += 1,
+            },
+            WalRecord::Pending { .. } => counts.pending += 1,
+            WalRecord::Confirm { .. } => counts.confirm += 1,
+            WalRecord::Terminal { outcome, .. } => match outcome {
+                PendingOutcome::Completed => counts.terminal_completed += 1,
+                PendingOutcome::ExpiredVoid => counts.terminal_voided += 1,
             },
         }
     }
@@ -227,13 +242,15 @@ pub fn render_html(report: &AuditReport) -> String {
     html
 }
 
-/// 统计块(四个数,proportional figures;标签用次级墨色)。
+/// 统计块(六个数,proportional figures;标签用次级墨色)。
 fn render_kpis(report: &AuditReport, html: &mut String) {
     html.push_str("<section class=\"kpis\" aria-label=\"统计\">\n");
     let tiles = [
         (report.rows.len().to_string(), "审计行数"),
         (report.counts.allow.to_string(), "放行笔数"),
         (report.counts.deny.to_string(), "拒绝笔数"),
+        (report.counts.pending.to_string(), "待支付单"),
+        (report.counts.confirm.to_string(), "人确认笔数"),
         (format_cents(report.allow_amount_cents), "累计放行金额"),
     ];
     for (value, label) in tiles {
@@ -408,6 +425,78 @@ fn render_timeline(report: &AuditReport, html: &mut String) {
                         memo,
                     ),
                     verdict_html,
+                )
+            }
+            // W-53a 人在环:③待支付(等人按指纹,确认前零资金流)。
+            WalRecord::Pending {
+                pending_id,
+                intent,
+                approved_amount_cents,
+                expires_ts,
+                ..
+            } => {
+                let memo = if intent.memo.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", escape_html(&intent.memo))
+                };
+                (
+                    badge("⏳", "待支付", BadgeKind::Neutral),
+                    format!("<code>{}</code>", escape_html(&intent.delegation_id)),
+                    format!(
+                        "单 <code>{}</code><br>审批 {} · {} · {}<br>\
+                         <span class=\"dim\">nonce {}{}</span>",
+                        escape_html(pending_id),
+                        format_cents(*approved_amount_cents),
+                        escape_html(&intent.merchant_id),
+                        escape_html(category_or_dash(&intent.category)),
+                        intent.nonce,
+                        memo,
+                    ),
+                    format!(
+                        "窗口至 {}(半开)<br><span class=\"dim\">等人确认;\
+                         确认前零资金流</span>",
+                        format_utc(*expires_ts),
+                    ),
+                )
+            }
+            // ④人确认:人的显式动作,支付凭证(交易号)入账。
+            WalRecord::Confirm {
+                pending_id,
+                amount_cents,
+                proof,
+                ..
+            } => (
+                badge("✓", "人确认", BadgeKind::Neutral),
+                format!("单 <code>{}</code>", escape_html(pending_id)),
+                format!(
+                    "确认 {}(必须 = 审批额)<br><span class=\"dim\">支付凭证 {}</span>",
+                    format_cents(*amount_cents),
+                    escape_html(proof),
+                ),
+                "人工显式确认(CLI;幂等,一次)".to_string(),
+            ),
+            // ⑤终态:完成 / TTL 过期作废。
+            WalRecord::Terminal {
+                pending_id,
+                outcome,
+                ..
+            } => {
+                let (badge_html, result) = match outcome {
+                    PendingOutcome::Completed => (
+                        badge("✓", "完成", BadgeKind::Good),
+                        "人已确认,订单完成(⑤终态)".to_string(),
+                    ),
+                    PendingOutcome::ExpiredVoid => (
+                        badge("⊘", "过期作废", BadgeKind::Neutral),
+                        "TTL 过期无人确认,作废(⑤终态)".to_string(),
+                    ),
+                };
+                (
+                    badge_html,
+                    format!("单 <code>{}</code>", escape_html(pending_id)),
+                    String::from("—"),
+                    result,
                 )
             }
         };
@@ -603,7 +692,7 @@ body {
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 0 0 12px; }
 .sub { color: var(--ink-2); margin: 0 0 24px; font-size: 13px; }
-.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
 .tile .v { font-size: 26px; font-weight: 650; line-height: 1.2; }
 .tile .l { color: var(--ink-2); font-size: 12px; margin-top: 2px; }

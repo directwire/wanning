@@ -126,7 +126,15 @@ fn max_spends_zero_attaches_no_velocity_policy_and_never_rate_limits() {
     // `--max-spends 0` = 显式关闭速率护栏;WAL 的注册行不带 velocity 字段,
     // 与 W-27 之前的行为字节一致(默认策略不落 policy 字段的同一先例)。
     let wal = fresh_wal_path("zero-rate-limit");
-    let mut server = McpServer::new_full(&wal, 1_000, 24, 0).expect("启动应成功");
+    let mut server = McpServer::new_full(
+        &wal,
+        1_000,
+        24,
+        0,
+        wanning_mcp::PayMode::default(),
+        wanning_mcp::DEFAULT_PENDING_TTL_SECS,
+    )
+    .expect("启动应成功");
     handshake(&mut server);
 
     for nonce in 1..=12 {
@@ -157,7 +165,15 @@ fn budget_override_caps_the_delegation_cap() {
     // 上限 500 分:花 10 分放行(budget_after = 累计已花 10),再花 495 分超额拒绝
     // (累计 505 > 500;恰满才算过,所以 500 恰好能花)。
     let wal = fresh_wal_path("budget-override");
-    let mut server = McpServer::new_full(&wal, 500, 24, 10).expect("启动应成功");
+    let mut server = McpServer::new_full(
+        &wal,
+        500,
+        24,
+        10,
+        wanning_mcp::PayMode::default(),
+        wanning_mcp::DEFAULT_PENDING_TTL_SECS,
+    )
+    .expect("启动应成功");
     handshake(&mut server);
 
     let within = decide(&mut server, 1, 1);

@@ -11,6 +11,7 @@ use wanning_mcp::McpServer;
 const USAGE: &str = "wanning-mcp:Wanning 支付闸的 MCP server(stdio,零网络、零真实消费)
 
 用法: wanning-mcp --wal <路径> [--budget <分>] [--max-spends <笔数>] [--hours <小时>]
+                 [--pay-mode <pending_pay|auto_debit|manual>] [--pending-ttl-secs <秒>]
 
   --wal <路径>      审计 WAL 文件(append-only JSONL)。**必填**:没有审计的闸不服务
                     (fail-closed)。产品默认账本位置是 ~/.wanning/wal.jsonl;
@@ -19,6 +20,14 @@ const USAGE: &str = "wanning-mcp:Wanning 支付闸的 MCP server(stdio,零网络
   --cap-cents <分>  旧名,与 --budget 同义(两个同时给 = 拒,两义性 fail-closed)。
   --max-spends <n>  速率护栏:滑动窗内至多 n 笔成功放行,默认 10;0 = 关掉护栏。
   --hours <小时>    演示委托的有效时长,默认 24(从启动时刻起)。
+  --pay-mode <档>   支付形态(W-53):pending_pay = 人在环待支付(默认;闸放行即开
+                    待支付单,人用 `wanning confirm` 按指纹确认);auto_debit = 免密
+                    代扣(平台侧第二形式;这里只改账本语义——放行即落地,不接任何
+                    通道);manual = 纯闸(只判定不开单)。**任何档位下确认都不在
+                    工具面上**:AI 不能确认 AI 自己的支付。
+  --pending-ttl-secs <秒>
+                    待支付单的有效窗口(半开 [开单, 过期)),默认 900 秒(15 分钟);
+                    pending_pay 档位下 0 = 拒启(开出来就死的单)。
   -V / --version    打印版本后退出(wanning doctor 的 ①/⑥ 检查靠它读版本)
   -h / --help       打印本说明后退出
 ";
@@ -28,6 +37,8 @@ struct Config {
     cap_cents: u64,
     hours: u64,
     max_spends: u32,
+    pay_mode: wanning_mcp::PayMode,
+    pending_ttl_secs: u64,
 }
 
 fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
@@ -35,6 +46,8 @@ fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
     let mut budget: Option<u64> = None;
     let mut hours = wanning_mcp::DEFAULT_HOURS;
     let mut max_spends = wanning_mcp::DEFAULT_MAX_SPENDS_PER_DAY;
+    let mut pay_mode = wanning_mcp::PayMode::default();
+    let mut pending_ttl_secs = wanning_mcp::DEFAULT_PENDING_TTL_SECS;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -77,6 +90,16 @@ fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
                     return Err("--hours 必须为正(0 小时的授权一启动就过期)".to_string());
                 }
             }
+            "--pay-mode" => {
+                let raw = next_value(args, &mut index, "--pay-mode")?;
+                pay_mode = parse_pay_mode(&raw)?;
+            }
+            "--pending-ttl-secs" => {
+                let raw = next_value(args, &mut index, "--pending-ttl-secs")?;
+                pending_ttl_secs = raw
+                    .parse()
+                    .map_err(|_| format!("--pending-ttl-secs 必须是非负整数(秒),收到: {raw}"))?;
+            }
             other => return Err(format!("未知参数: {other}(用 --help 看用法)")),
         }
         index += 1;
@@ -93,7 +116,21 @@ fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
         cap_cents: budget.unwrap_or(wanning_mcp::DEFAULT_CAP_CENTS),
         hours,
         max_spends,
+        pay_mode,
+        pending_ttl_secs,
     }))
+}
+
+/// 档位字面量 → PayMode(与 core 的 serde snake_case 落盘形状逐字一致)。
+fn parse_pay_mode(raw: &str) -> Result<wanning_mcp::PayMode, String> {
+    match raw {
+        "pending_pay" => Ok(wanning_mcp::PayMode::PendingPay),
+        "auto_debit" => Ok(wanning_mcp::PayMode::AutoDebit),
+        "manual" => Ok(wanning_mcp::PayMode::Manual),
+        other => Err(format!(
+            "--pay-mode 只认 pending_pay / auto_debit / manual,收到: {other}"
+        )),
+    }
 }
 
 fn next_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, String> {
@@ -128,6 +165,8 @@ fn main() -> ExitCode {
         config.cap_cents,
         config.hours,
         config.max_spends,
+        config.pay_mode,
+        config.pending_ttl_secs,
     ) {
         Ok(server) => server,
         Err(e) => {

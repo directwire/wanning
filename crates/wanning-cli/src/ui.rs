@@ -39,6 +39,7 @@ use std::time::Duration;
 
 use wanning_core::clock::{Clock, SystemClock};
 use wanning_core::error::CoreError;
+use wanning_core::pending::PendingOutcome;
 use wanning_core::state::WanningState;
 use wanning_core::wal::{WalDecision, WalRecord};
 use wanning_demo::audit_html;
@@ -831,6 +832,66 @@ fn render_dashboard(wal: &Path, report: &audit_html::AuditReport, token: &str) -
                     audit_html::escape_html(&intent.category),
                     reason_label,
                     audit_html::format_cents(*budget_after_cents),
+                    audit_html::chain_hex(row.link.value),
+                ));
+            }
+            // W-53a 人在环:③待支付(等人按指纹,确认前零资金流)。
+            WalRecord::Pending {
+                pending_id,
+                intent,
+                approved_amount_cents,
+                expires_ts,
+                ..
+            } => {
+                html.push_str(&format!(
+                    "<td><span class=\"badge neutral\">◇ 待支付</span></td><td><code>{}</code></td>\
+                     <td>{}</td><td>{} / {}</td><td>单 <code>{}</code> · 窗口至 {}(等人确认)</td>\
+                     <td>-</td><td>0x{}</td>",
+                    audit_html::escape_html(&intent.delegation_id),
+                    audit_html::format_cents(*approved_amount_cents),
+                    audit_html::escape_html(&intent.merchant_id),
+                    audit_html::escape_html(&intent.category),
+                    audit_html::escape_html(pending_id),
+                    audit_html::format_utc(*expires_ts),
+                    audit_html::chain_hex(row.link.value),
+                ));
+            }
+            // ④人确认:人的显式动作,支付凭证入账(闸不验支付本身,如实呈现)。
+            WalRecord::Confirm {
+                pending_id,
+                amount_cents,
+                proof,
+                ..
+            } => {
+                html.push_str(&format!(
+                    "<td><span class=\"badge neutral\">✋ 人确认</span></td><td>单 <code>{}</code></td>\
+                     <td>{}</td><td>-</td><td>支付凭证 {}(幂等,一次)</td><td>-</td><td>0x{}</td>",
+                    audit_html::escape_html(pending_id),
+                    audit_html::format_cents(*amount_cents),
+                    audit_html::escape_html(proof),
+                    audit_html::chain_hex(row.link.value),
+                ));
+            }
+            // ⑤终态:完成 / TTL 过期作废。
+            WalRecord::Terminal {
+                pending_id,
+                outcome,
+                ..
+            } => {
+                let (badge, note) = match outcome {
+                    PendingOutcome::Completed => (
+                        "<span class=\"badge good\">● 完成</span>",
+                        "人已确认,订单完成(⑤终态)",
+                    ),
+                    PendingOutcome::ExpiredVoid => (
+                        "<span class=\"badge neutral\">⊘ 过期作废</span>",
+                        "TTL 过期无人确认,作废(⑤终态)",
+                    ),
+                };
+                html.push_str(&format!(
+                    "{badge}</td><td>单 <code>{}</code></td><td>-</td><td>-</td><td>{}</td><td>-</td><td>0x{}</td>",
+                    audit_html::escape_html(pending_id),
+                    note,
                     audit_html::chain_hex(row.link.value),
                 ));
             }

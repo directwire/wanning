@@ -21,17 +21,18 @@ fn evaluate_call(id: i64, nonce: u64, amount_cents: u64, delegation_id: &str) ->
 }
 
 #[test]
-fn initialize_lists_two_tools_with_schemas() {
+fn initialize_lists_three_tools_with_schemas_and_never_the_confirm_face() {
     let mut proc = McpProc::spawn(&["--wal", &fresh_wal_path("init").to_string_lossy()]);
     proc.handshake();
 
     proc.send(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let value = proc.response();
     let tools = value["result"]["tools"].as_array().expect("tools 数组");
-    assert_eq!(tools.len(), 2);
+    assert_eq!(tools.len(), 3);
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     assert!(names.contains(&"wanning_gate_evaluate"), "{names:?}");
     assert!(names.contains(&"wanning_audit_tail"), "{names:?}");
+    assert!(names.contains(&"wanning_pending_status"), "{names:?}");
 
     let evaluate = tools
         .iter()
@@ -41,6 +42,14 @@ fn initialize_lists_two_tools_with_schemas() {
     let required = evaluate["inputSchema"]["required"].as_array().unwrap();
     assert!(required.contains(&json!("amount_cents")));
     assert!(required.contains(&json!("nonce")));
+
+    // W-53b 契约(真子进程实证):工具面连 confirm 字样都不得出现——
+    // AI 不能确认 AI 自己的支付;人在环的确认走所有者 CLI,不在 MCP 面。
+    let rendered = value["result"]["tools"].to_string().to_lowercase();
+    assert!(
+        !rendered.contains("confirm"),
+        "工具面不得出现 confirm 字样: {rendered}"
+    );
 
     proc.shutdown();
 }
@@ -60,8 +69,20 @@ fn gate_tool_allow_then_replay_then_over_budget_then_unknown_delegation() {
         500
     );
     assert_eq!(
-        value["result"]["structuredContent"]["wal_line"], 2,
-        "行1=注册委托"
+        value["result"]["structuredContent"]["wal_line"], 3,
+        "行1=注册委托 行2=判定 行3=待支付(默认档位人在环,W-53)"
+    );
+    let pending = &value["result"]["structuredContent"]["pending"];
+    assert!(
+        pending["pending_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("p-"),
+        "放行即开待支付单,回执带单号: {value}"
+    );
+    assert_eq!(
+        pending["approved_amount_cents"], 500,
+        "审批额 = 意图额(确认时的金额钉就是和它比)"
     );
     assert!(
         value["result"]["content"][0]["text"]
@@ -121,9 +142,140 @@ fn audit_tail_reads_wal_after_decisions() {
         "WAL 行要能看到预算轨迹: {text}"
     );
     let line_count = text.lines().count();
-    assert_eq!(line_count, 3, "注册+allow+deny 共 3 行: {text}");
+    assert_eq!(
+        line_count, 4,
+        "注册+allow+pending(开单)+deny 共 4 行: {text}"
+    );
 
     proc.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// W-53b:支付形态档位(--pay-mode / --pending-ttl-secs)与只读 pending 查询
+// ---------------------------------------------------------------------------
+
+#[test]
+fn non_pending_modes_keep_the_old_two_row_shape_over_stdio() {
+    for (mode, tag) in [("manual", "manual-mode"), ("auto_debit", "autodebit-mode")] {
+        let wal = fresh_wal_path(tag);
+        let mut proc = McpProc::spawn(&[
+            "--wal",
+            &wal.to_string_lossy(),
+            "--pay-mode",
+            mode,
+            "--pending-ttl-secs",
+            "60",
+        ]);
+        proc.handshake();
+
+        proc.send(&evaluate_call(60, 1, 400, "demo-d1"));
+        let value = proc.response();
+        assert_eq!(
+            value["result"]["structuredContent"]["decision"], "allow",
+            "{mode}: {value}"
+        );
+        assert_eq!(
+            value["result"]["structuredContent"]["wal_line"], 2,
+            "{mode}:注册 + 判定,不开待支付单"
+        );
+        assert!(
+            value["result"]["structuredContent"]
+                .get("pending")
+                .is_none(),
+            "{mode} 不开单"
+        );
+
+        // 只读 pending 查询在任何档位都在:自报档位,orders 空。
+        proc.send(&json!({
+            "jsonrpc": "2.0", "id": 61, "method": "tools/call",
+            "params": { "name": "wanning_pending_status", "arguments": {} }
+        }));
+        let value = proc.response();
+        assert_eq!(value["result"]["structuredContent"]["pay_mode"], mode);
+        assert_eq!(
+            value["result"]["structuredContent"]["orders"]
+                .as_array()
+                .expect("orders 数组")
+                .len(),
+            0
+        );
+        proc.shutdown();
+    }
+}
+
+#[test]
+fn pending_status_lists_open_orders_over_stdio() {
+    let wal = fresh_wal_path("status");
+    let mut proc = McpProc::spawn(&["--wal", &wal.to_string_lossy()]);
+    proc.handshake();
+
+    proc.send(&evaluate_call(64, 1, 400, "demo-d1"));
+    let value = proc.response();
+    let pending_id = value["result"]["structuredContent"]["pending"]["pending_id"]
+        .as_str()
+        .expect("放行回执带单号")
+        .to_string();
+
+    // 列全:1 张 open 单,带审批额与凭证位(未确认 = null)。
+    proc.send(&json!({
+        "jsonrpc": "2.0", "id": 65, "method": "tools/call",
+        "params": { "name": "wanning_pending_status", "arguments": {} }
+    }));
+    let value = proc.response();
+    let structured = &value["result"]["structuredContent"];
+    assert_eq!(structured["pay_mode"], "pending_pay");
+    assert_eq!(structured["pending_ttl_secs"], 900, "产品默认 15 分钟");
+    let orders = structured["orders"].as_array().expect("orders 数组");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0]["pending_id"], pending_id);
+    assert_eq!(orders[0]["state"], "open");
+    assert_eq!(orders[0]["approved_amount_cents"], 400);
+    assert!(orders[0]["proof"].is_null(), "未确认没有凭证");
+
+    // 点名查同一张单;未知单号 = isError(业务错误,不是协议错误)。
+    proc.send(&json!({
+        "jsonrpc": "2.0", "id": 66, "method": "tools/call",
+        "params": { "name": "wanning_pending_status",
+                    "arguments": { "pending_id": pending_id } }
+    }));
+    let value = proc.response();
+    assert_eq!(
+        value["result"]["structuredContent"]["orders"][0]["pending_id"],
+        pending_id
+    );
+
+    proc.send(&json!({
+        "jsonrpc": "2.0", "id": 67, "method": "tools/call",
+        "params": { "name": "wanning_pending_status",
+                    "arguments": { "pending_id": "p-does-not-exist" } }
+    }));
+    let value = proc.response();
+    assert!(value["result"]["isError"].as_bool().unwrap(), "{value}");
+
+    proc.shutdown();
+}
+
+#[test]
+fn bad_pay_mode_or_zero_ttl_refuse_to_start() {
+    for (extra_args, needle) in [
+        (vec!["--pay-mode", "auto"], "pending_pay"),
+        (vec!["--pending-ttl-secs", "0"], "TTL"),
+    ] {
+        let wal = fresh_wal_path("bad-flags");
+        let wal_str = wal.to_string_lossy().to_string();
+        let mut args = vec!["--wal", wal_str.as_str()];
+        args.extend(extra_args.iter().copied());
+        let output = Command::new(env!("CARGO_BIN_EXE_wanning-mcp"))
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("spawn wanning-mcp");
+        assert!(!output.status.success(), "坏档位/TTL 必须拒启: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(needle), "报错要可读: {stderr}");
+    }
 }
 
 #[test]
@@ -307,7 +459,7 @@ fn notifications_of_request_methods_and_batches_stay_silent_or_rejected() {
         "通知与 batch 都不得动账: {value}"
     );
 
-    // ⑤ 审计对账:注册 + ④的放行 = 2 行;通知与 batch 各自零落账。
+    // ⑤ 审计对账:注册 + ④的放行 + 开单 = 3 行;通知与 batch 各自零落账。
     proc.send(&json!({
         "jsonrpc": "2.0", "id": 103, "method": "tools/call",
         "params": { "name": "wanning_audit_tail", "arguments": { "lines": 100 } }
@@ -318,8 +470,8 @@ fn notifications_of_request_methods_and_batches_stay_silent_or_rejected() {
         .expect("文本");
     assert_eq!(
         text.lines().count(),
-        2,
-        "注册+allow 两行,通知与 batch 零落账: {text}"
+        3,
+        "注册+allow+pending 三行,通知与 batch 零落账: {text}"
     );
 
     proc.shutdown();

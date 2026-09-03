@@ -842,6 +842,9 @@ dependencies = [
 name = "wanning-cli"
 version = "0.1.2"
 dependencies = [
+ "base64",
+ "rand",
+ "rsa",
  "serde_json",
  "wanning-core",
  "wanning-demo",

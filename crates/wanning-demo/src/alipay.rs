@@ -17,21 +17,23 @@
 //! - 资金零沉淀:Wanning 不碰钱、不代收代付、不做二清(刑事红线,无豁免);
 //!   授权动作走闸([`crate::guard`] + wanning-core 的 delegation/gate),资金流走
 //!   支付宝侧既有通道(商家扣款产品),从签约到扣款都在官方协议产品内;
-//! - 红线:零密钥零注册零真实消费。真密钥经 [`crate::signing`] 槽位接入
-//!   (TODO(账户开通后实签)),绝不写死在代码里、绝不落仓;本仓测试全部用
-//!   自生成测试密钥对(W-28 先例)扮演两端。
+//! - 红线:零密钥零注册零真实消费。真密钥经 [`crate::signing`] 的 env 注入实现
+//!   现取现用(W-52),绝不写死在代码里、绝不落仓;本仓测试全部用自生成测试
+//!   密钥对(W-28 先例)扮演两端。
 //!
 //! 共用类型(trait/请求/回调幂等/错误)在 [`crate::channel`];这里 `pub use` 再导出,
 //! 既有引用路径(`wanning_demo::alipay::…`,W-11 测试引用)保持有效。
 //!
-//! TODO(账户开通后实签)清单(全部收敛到「实签」一级,W-50):
-//! 1. 真密钥接入:商户应用私钥 + 支付宝公钥经 env 注入位接入
-//!    [`crate::signing::MessageSigner`] / [`crate::signing::SignatureVerifier`]
-//!    (绝不写死/落仓);密钥管理工具(alipay.keytool / 开放平台后台下载)由所有者侧操作。
-//! 2. 实签验证:真网关 + 真密钥跑通一笔真实协议内扣款,核对本仓模板与网关实测行为
-//!    (报文形状/签名串/async_payment_mode 实际取值);不一致处改这里并回归测试。
+//! TODO(账户开通后实签)清单(W-50 收敛到「实签」一级,W-52 落地引导半边):
+//! 1. 真密钥接入:**已落地(W-52)**——[`crate::signing::EnvRsaSigner`] /
+//!    [`crate::signing::EnvRsaVerifier`] 从 env 注入位现取现用(绝不写死/落仓);
+//!    密钥管理工具(开放平台后台/密钥工具)由所有者侧操作。
+//! 2. 实签验证:`wanning channel-test --channel alipay`(W-52)一条命令引导——
+//!    L1 签名自测(零网络)→ L2 网关探针(precreate 零资金移动,核「签名认不认」)
+//!    → L3 协议内 0.01 元真实扣款(四重明示,核完整链路与 async_payment_mode
+//!    实际取值)。不一致处改这里并回归测试。
 //! 3. 签约半边(alipay.user.agreement.page.sign → agreement_no 的落库)不归本仓:
-//!    签约是所有者侧动作,Wanning 只消费协议号(内部决策口径在档)。
+//!    签约是所有者侧动作,Wanning 只消费协议号(口径在档,内部清单 B 节)。
 
 use std::sync::Arc;
 
@@ -60,6 +62,15 @@ pub const ALIPAY_GATEWAY: &str = "https://openapi.alipay.com/gateway.do";
 /// 「对每个用户的单笔扣款不超过 100 元」;来源在调研文档)。total_amount 官方字段
 /// 上限是 100000000 元——本仓按产品口径取更严的 100 元,扣款语义由协议约定。
 pub const ALIPAY_SINGLE_DEDUCT_MAX_CENTS: u64 = 100 * 100;
+
+/// precreate 探针金额:1 分 = 0.01 元——官方 total_amount 最小值([公开文档直核
+/// W-52]:取值范围 [0.01,100000000];探针只走报文,零资金移动)。
+pub const PRECREATE_PROBE_AMOUNT_CENTS: u64 = 1;
+
+/// precreate 探针的固定销售产品码 `FACE_TO_FACE_PAYMENT`(当面付;[公开文档直核
+/// W-52]:官方 Java SDK AlipayTradePrecreateModel 默认值。v3 spec 未标必填 →
+/// 显式带上:探针回答「签名认不认」,业务权限被拒也是已验签响应,同样回答问题)。
+pub const PRECREATE_PRODUCT_CODE: &str = "FACE_TO_FACE_PAYMENT";
 
 /// 真实路径请求模板的配置(所有者侧提供,经 env 注入,见 [`AlipayBackend::from_snapshot_real`])。
 #[derive(Clone, PartialEq, Eq)]
@@ -222,6 +233,14 @@ pub fn build_trade_pay_request(
     signer: &dyn MessageSigner,
 ) -> Result<OutgoingPayRequest, PaymentError> {
     request.validate()?;
+    // 协议内扣款语义(模块文档;W-52 起探针配置不带协议号,这层构建期守卫保证
+    // 探针配置绝无可能被拿去构建扣款报文——fail-closed,零网络)。
+    if cfg.agreement_no.trim().is_empty() {
+        return Err(PaymentError::InvalidRequest(
+            "无协议号绝不发扣款:AlipayRealConfig 缺 agreement_no(协议内扣款,不是裸转账)"
+                .to_string(),
+        ));
+    }
     if request.amount_cents > ALIPAY_SINGLE_DEDUCT_MAX_CENTS {
         return Err(PaymentError::InvalidRequest(format!(
             "扣款金额超商家扣款产品单笔上限:{} 分 > {} 分(100 元,产品规则;协议内扣款语义,见模块文档)",
@@ -255,9 +274,26 @@ pub fn build_trade_pay_request(
     if let Some(url) = &cfg.notify_url {
         params.push(("notify_url", url.clone()));
     }
-    // 签名串:biz_content 以原始 JSON 字符串参与(值原样,零转义——官方步骤2)。
+    // 平台参数 + biz_content → 签名 → 完整请求(与 precreate 共用一条管线,见
+    // [`sign_gateway_request`];官方步骤2/4/5 同一规则)。
+    sign_gateway_request(&cfg.gateway, params, &biz, signer)
+}
+
+/// 平台参数 + 业务参数(`biz_content`)→ 待签串 → RSA2 签名 → base64 → 完整请求。
+/// trade.pay 与 precreate(W-52)共用,**不另写字段面**(W-52 任务书;第二个
+/// 使用方出现才抽,http.rs/mock_server.rs 同一先例)。
+///
+/// - 签名串:biz_content 以原始 JSON 字符串参与(值原样,零转义——官方步骤2);
+/// - query = 平台参数按 ASCII 升序 + `sign` 追加在最后(官方请求示例形状);
+///   值全部 URL 编码(官方步骤4:签名之后才编码)。
+fn sign_gateway_request(
+    gateway: &str,
+    mut params: Vec<(&'static str, String)>,
+    biz: &str,
+    signer: &dyn MessageSigner,
+) -> Result<OutgoingPayRequest, PaymentError> {
     let mut signed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    signed.push(("biz_content", biz.as_str()));
+    signed.push(("biz_content", biz));
     let canonical =
         canonical_query(&signed).map_err(|e| PaymentError::InvalidRequest(e.to_string()))?;
     let signature = signer
@@ -265,8 +301,6 @@ pub fn build_trade_pay_request(
         .map_err(|e| PaymentError::Config(format!("请求签名失败,拒绝出网: {e}")))?;
     let sign_b64 = B64.encode(signature);
 
-    // query = 平台参数按 ASCII 升序 + `sign` 追加在最后(官方请求示例形状);
-    // 值全部 URL 编码(官方步骤4:签名之后才编码)。
     params.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut query_pairs: Vec<String> = params
         .iter()
@@ -274,8 +308,8 @@ pub fn build_trade_pay_request(
         .collect();
     query_pairs.push(format!("sign={}", form_encode(&sign_b64)));
     Ok(OutgoingPayRequest {
-        url: format!("{}?{}", cfg.gateway, query_pairs.join("&")),
-        body: format!("biz_content={}", form_encode(&biz)),
+        url: format!("{}?{}", gateway, query_pairs.join("&")),
+        body: format!("biz_content={}", form_encode(biz)),
         content_type: "application/x-www-form-urlencoded",
     })
 }
@@ -305,17 +339,8 @@ fn parse_trade_pay_response(
         ))
     })?;
     let inner = envelope.response.get();
-    let sig_bytes = B64
-        .decode(envelope.sign.as_bytes())
-        .map_err(|e| PaymentError::BadResponse(format!("同步响应 sign 不是合法 base64: {e}")))?;
-    let unescaped = inner.replace("\\/", "/");
-    let verified = verifier.verify(inner, &sig_bytes)
-        || (unescaped != inner && verifier.verify(&unescaped, &sig_bytes));
-    if !verified {
-        return Err(PaymentError::BadResponse(
-            "同步响应验签不过:报文与签名不匹配,拒绝采信(fail-closed)".to_string(),
-        ));
-    }
+    // 验签半边与 precreate 探针(W-52)共用一条管线,见 [`verify_envelope_response`]。
+    verify_envelope_response(inner, &envelope.sign, verifier)?;
 
     let body: serde_json::Value = serde_json::from_str(inner).map_err(|e| {
         PaymentError::BadResponse(format!("同步响应正文解析失败: {e};原文: {inner:.200}"))
@@ -332,14 +357,8 @@ fn parse_trade_pay_response(
             sub_msg: str_field(&body, "sub_msg"),
         });
     }
-    let trade_no = str_field(&body, "trade_no")
-        .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| {
-            PaymentError::BadResponse("code=10000 但缺 trade_no,无法对账".to_string())
-        })?;
-    let total_amount = str_field(&body, "total_amount").ok_or_else(|| {
-        PaymentError::BadResponse("code=10000 但缺 total_amount,无法对账".to_string())
-    })?;
+    let trade_no = required_field(&body, "trade_no", "无法对账")?;
+    let total_amount = required_field(&body, "total_amount", "无法对账")?;
     let amount_cents = yuan_to_cents(&total_amount)?;
     if amount_cents != request.amount_cents {
         return Err(PaymentError::BadResponse(format!(
@@ -377,6 +396,37 @@ fn str_field(body: &serde_json::Value, key: &str) -> Option<String> {
     body.get(key)
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
+}
+
+/// 同步响应信封的**验签半边**(trade.pay 与 precreate 探针 W-52 共用;第二个
+/// 使用方出现才抽,http.rs/sign_gateway_request 同一先例):sign base64 解码
+/// → 先按 `xxx_response` 成员**逐字节原文**验,不过再把 `\/` → `/` 替换重试
+/// 一次(官方 SDK 对部分网关的转义响应同款),两次都不过 = 拒绝采信。
+fn verify_envelope_response(
+    inner: &str,
+    sign_b64: &str,
+    verifier: &dyn SignatureVerifier,
+) -> Result<(), PaymentError> {
+    let sig_bytes = B64
+        .decode(sign_b64.as_bytes())
+        .map_err(|e| PaymentError::BadResponse(format!("同步响应 sign 不是合法 base64: {e}")))?;
+    let unescaped = inner.replace("\\/", "/");
+    let verified = verifier.verify(inner, &sig_bytes)
+        || (unescaped != inner && verifier.verify(&unescaped, &sig_bytes));
+    if !verified {
+        return Err(PaymentError::BadResponse(
+            "同步响应验签不过:报文与签名不匹配,拒绝采信(fail-closed)".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// `code=10000` 响应的必备字段:缺失**或空串** = BadResponse 点名(报文不完整
+/// 绝不猜;`why` 说明为什么必须由调用方给,如「无法对账」「预下单未成立」)。
+fn required_field(body: &serde_json::Value, key: &str, why: &str) -> Result<String, PaymentError> {
+    str_field(body, key)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| PaymentError::BadResponse(format!("code=10000 但缺 {key},{why}")))
 }
 
 /// 验证**原始异步通知 form 报文**并解析([`PayNotify`])——验签前置门。
@@ -500,6 +550,184 @@ fn percent_decode(value: &str, plus_as_space: bool) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+// ── precreate 探针(W-52:channel-test L2「网关探针」的报文半边) ────────────
+//
+// `alipay.trade.precreate`(当面付·扫码支付预下单)= 官方接口里最小「真签名、
+// 真网关、零资金移动」的探针([公开文档直核 W-52]:预下单只生成二维码,买家不
+// 扫码即不产生资金流;字段面来源 target/w52/precreate-direct-verify.md,官方
+// Java SDK + v3-openapi 双源直核)。探针回答的问题 = **服务器认不认签名**
+// (W-50「待实签」清单第一格);业务权限被拒也是已验签响应,同样回答这个问题。
+// L2 过 ≠ 能扣款(过账本不豁免,见 [`AlipayBackend::probe_precreate`])。
+
+/// 构建 `alipay.trade.precreate` 请求:与 [`build_trade_pay_request`] 同一条
+/// 签名管线([`sign_gateway_request`]),**不另写字段面**(W-52 任务书);
+/// 平台参数同一组,唯独不带 `notify_url`——探针是一次性报文,不留异步回调面。
+///
+/// 业务参数([公开文档直核 W-52]):`out_trade_no`(官方字符集与长度由
+/// [`sanitize_out_trade_no`] 统一把关)/ `total_amount`(探针固定 1 分 = 官方
+/// 最小值 0.01 元)/ `subject`(官方必填 ≤256 字符,禁 `/`、`=`、`&` 特殊字符)/
+/// `product_code` = [`PRECREATE_PRODUCT_CODE`]。
+pub fn build_precreate_request(
+    cfg: &AlipayRealConfig,
+    out_trade_no: &str,
+    amount_cents: u64,
+    subject: &str,
+    timestamp: &str,
+    signer: &dyn MessageSigner,
+) -> Result<OutgoingPayRequest, PaymentError> {
+    let out_trade_no = sanitize_out_trade_no(out_trade_no)?;
+    if amount_cents == 0 {
+        return Err(PaymentError::InvalidRequest(
+            "探针金额必须为正:0 分不构成一笔可预下单的交易(total_amount 官方最小 0.01 元)"
+                .to_string(),
+        ));
+    }
+    let subject = subject.trim();
+    if subject.is_empty() {
+        return Err(PaymentError::InvalidRequest(
+            "subject 不能为空:官方必填字段,探针报文同样要带商品标题".to_string(),
+        ));
+    }
+    let subject_len = subject.chars().count();
+    if subject_len > 256 {
+        return Err(PaymentError::InvalidRequest(format!(
+            "subject 超长:{subject_len} 字符 > 官方上限 256"
+        )));
+    }
+    if subject.contains('/') || subject.contains('=') || subject.contains('&') {
+        return Err(PaymentError::InvalidRequest(
+            "subject 含官方禁止的特殊字符(/、=、&):换文案重试,绝不静默改写报文".to_string(),
+        ));
+    }
+    let biz = serde_json::json!({
+        "out_trade_no": out_trade_no,
+        "product_code": PRECREATE_PRODUCT_CODE,
+        "subject": subject,
+        "total_amount": cents_to_yuan_amount(amount_cents),
+    })
+    .to_string();
+
+    let params: Vec<(&'static str, String)> = vec![
+        ("app_id", cfg.app_id.clone()),
+        ("charset", "utf-8".to_string()),
+        ("method", "alipay.trade.precreate".to_string()),
+        ("sign_type", "RSA2".to_string()),
+        ("timestamp", timestamp.to_string()),
+        ("version", "1.0".to_string()),
+    ];
+    sign_gateway_request(&cfg.gateway, params, &biz, signer)
+}
+
+/// precreate 探针的结果(已验签响应里与探针相关的字段 + 已发出的请求原文)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrecreateProbe {
+    /// 响应回传的商户订单号(必须与请求一致,不一致 = 拒绝采信)。
+    pub out_trade_no: String,
+    /// 支付宝交易号(预下单成立的凭证)。
+    pub prepay_id: String,
+    /// 二维码链接(买家扫码才产生资金流;探针只看签名,不扫码)。
+    pub qr_code: Option<String>,
+    /// 短码(可选,官方字段 `share_code`)。
+    pub share_code: Option<String>,
+    /// 已验签的 `alipay_trade_precreate_response` 成员原文(逐字节,落取证档用;
+    /// 密钥不在此列,信封里没有任何密钥材料)。
+    pub verified_body: String,
+    /// 已发出的请求 URL 原文(query 含 `app_id` 与 `sign`——不是密钥材料,但
+    /// channel-test 取证档按自己的脱敏纪律打码;本层不做脱敏决策)。
+    pub request_url: String,
+    /// 已发出的请求体原文(`biz_content=<URL 编码 JSON>`)。
+    pub request_body: String,
+}
+
+/// 解析**已签名**的 precreate 同步响应:信封提取(RawValue 保真)→ 验签
+/// ([`verify_envelope_response`] 共用)→ `code` 语义 → `out_trade_no` 对账。
+fn parse_precreate_response(
+    raw: &str,
+    requested_out_trade_no: &str,
+    verifier: &dyn SignatureVerifier,
+) -> Result<PrecreateProbe, PaymentError> {
+    #[derive(Deserialize)]
+    struct PrecreateEnvelope<'a> {
+        #[serde(rename = "alipay_trade_precreate_response", borrow)]
+        response: &'a serde_json::value::RawValue,
+        #[serde(rename = "sign")]
+        sign: String,
+    }
+    let envelope: PrecreateEnvelope = serde_json::from_str(raw).map_err(|e| {
+        PaymentError::BadResponse(format!(
+            "同步响应缺少 alipay_trade_precreate_response/sign 形态,拒绝解析: {e};原文: {raw:.200}"
+        ))
+    })?;
+    let inner = envelope.response.get();
+    verify_envelope_response(inner, &envelope.sign, verifier)?;
+
+    let body: serde_json::Value = serde_json::from_str(inner).map_err(|e| {
+        PaymentError::BadResponse(format!("同步响应正文解析失败: {e};原文: {inner:.200}"))
+    })?;
+    let code = body
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| PaymentError::BadResponse("同步响应缺 code".to_string()))?;
+    if code != "10000" {
+        // 网关明确拒绝(响应可信:已验签)。对探针而言这也是答案:签名类
+        // sub_code = 请求签名没过;参数/权限类 = 签名已过、业务被拒。码值
+        // 原样带出,逐条落审计/取证档追因。
+        return Err(PaymentError::GatewayRejected {
+            code: code.to_string(),
+            sub_code: str_field(&body, "sub_code"),
+            sub_msg: str_field(&body, "sub_msg"),
+        });
+    }
+    let out_trade_no = required_field(&body, "out_trade_no", "无法对账")?;
+    if out_trade_no != requested_out_trade_no {
+        return Err(PaymentError::BadResponse(format!(
+            "渠道回传 out_trade_no 与请求不符:请求 {requested_out_trade_no} / 响应 {out_trade_no}(拒绝采信)"
+        )));
+    }
+    let prepay_id = required_field(&body, "prepay_id", "预下单未成立")?;
+    Ok(PrecreateProbe {
+        out_trade_no,
+        prepay_id,
+        qr_code: str_field(&body, "qr_code"),
+        share_code: str_field(&body, "share_code"),
+        verified_body: inner.to_string(),
+        // parse 层拿不到请求原文,由调用方(probe_precreate)补上——见下。
+        request_url: String::new(),
+        request_body: String::new(),
+    })
+}
+
+/// 把请求 URL 的 query 拆回参数对(percent 解码)。`form_encode` 从不产生
+/// `+`(空格编成 `%20`),故这里 `+` 不按空格解——与签名串的字节原样一致,
+/// channel-test L1 用它复算待签串做「签名自测」往返。
+pub fn query_pairs_of(url: &str) -> Vec<(String, String)> {
+    let query = url.split_once('?').map(|(_, q)| q).unwrap_or(url);
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) => (percent_decode(key, false), percent_decode(value, false)),
+            None => (percent_decode(pair, false), String::new()),
+        })
+        .collect()
+}
+
+/// L2 起的真实路径护栏:env `WANNING_ALLOW_REAL_SPEND` 必须为 `1`——与 W-07
+/// 护栏同一个开关、同一个常量 [`crate::guard::ENV_ALLOW_REAL_SPEND`],探针不
+/// 另立开关(过账本不豁免护栏)。刻意不走 [`check_real_spend`]:那要求 GLM/
+/// 京东四密钥,语义是「全链真实消费」的护栏;探针只碰支付宝网关,app_id 与
+/// 密钥槽位缺失由 [`AlipayBackend::from_snapshot_probe`] / 槽位门逐项点名。
+fn require_allow_real_spend(env: &EnvSnapshot) -> Result<(), PaymentError> {
+    if env.get(crate::guard::ENV_ALLOW_REAL_SPEND) == Some("1") {
+        Ok(())
+    } else {
+        Err(PaymentError::GuardBlocked(
+            "真实路径护栏未开:WANNING_ALLOW_REAL_SPEND 必须为 1(W-07 护栏;channel-test L2 起必需)"
+                .to_string(),
+        ))
+    }
+}
+
 /// 支付宝 adapter(免密代扣 = **协议内扣款**,不是裸转账——见模块文档)。
 ///
 /// `Debug` 手写:凭证在 [`RealSpendConfig`] 打码、协议号在 [`AlipayRealConfig`]
@@ -521,6 +749,13 @@ fn env_value(env: &EnvSnapshot, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
         .map(str::to_string)
 }
+
+/// 签名/验签槽位的引用对([`AlipayBackend::require_slots`] 的返回形状;type
+/// complexity 收口,W-50 `CapturedRequests` 同款先例)。
+type SlotRefs<'a> = (
+    &'a Arc<dyn MessageSigner + Send + Sync>,
+    &'a Arc<dyn SignatureVerifier + Send + Sync>,
+);
 
 impl AlipayBackend {
     /// 本地 mock 用:测试假凭证 + 本地地址(零外网)。
@@ -581,6 +816,45 @@ impl AlipayBackend {
     /// 从当前进程环境构建真实 adapter。
     pub fn from_env_real() -> Result<Self, PaymentError> {
         Self::from_snapshot_real(&EnvSnapshot::from_process_env())
+    }
+
+    /// L2 网关探针配置(`wanning channel-test` 用):与 [`Self::from_snapshot_real`]
+    /// 同一 env 槽位、同一条报文管线,**唯独不要求签约协议号**——探针只做
+    /// precreate(零资金移动),没有扣款语义。护栏只查
+    /// `WANNING_ALLOW_REAL_SPEND=1`(W-07 同一开关,见 [`require_allow_real_spend`]);
+    /// `WANNING_ALIPAY_APP_ID` 缺失在这里点名。**探针配置拿去扣款会在构建层
+    /// fail-closed**([`build_trade_pay_request`] 无协议号绝不发扣款,零网络)。
+    pub fn from_snapshot_probe(env: &EnvSnapshot) -> Result<Self, PaymentError> {
+        require_allow_real_spend(env)?;
+        let app_id = env_value(env, "WANNING_ALIPAY_APP_ID").ok_or_else(|| {
+            PaymentError::Config(
+                "缺少 WANNING_ALIPAY_APP_ID:支付宝开放平台应用 app_id(所有者在开放平台创建应用后填入)"
+                    .to_string(),
+            )
+        })?;
+        let real_config = AlipayRealConfig {
+            gateway: env_value(env, "WANNING_ALIPAY_ENDPOINT")
+                .unwrap_or_else(|| ALIPAY_GATEWAY.to_string()),
+            app_id,
+            // 探针无协议号:扣款语义被构建层守卫挡死(协议内扣款,不是裸转账)。
+            agreement_no: String::new(),
+            notify_url: None,
+        };
+        Ok(Self {
+            endpoint: real_config.gateway.clone(),
+            // 探针不消费 GLM/京东凭证(全链护栏语义与探针不同构,见
+            // require_allow_real_spend);留空串,Debug 打码照常生效。
+            credentials: RealSpendConfig {
+                glm_key: String::new(),
+                jd_app_key: String::new(),
+                jd_app_secret: String::new(),
+                jd_access_token: String::new(),
+            },
+            transport: Arc::new(UreqApiTransport),
+            real_config: Some(real_config),
+            signer: None,
+            verifier: None,
+        })
     }
 
     /// 换传输(测试把真实路径指向本地替身/录制的唯一入口)。
@@ -653,7 +927,21 @@ impl AlipayBackend {
         request: &PayRequest,
     ) -> Result<PayResult, PaymentError> {
         // fail-closed:签名/验签槽位缺一即拒,绝不出网(没有签名 = 报文不可信;
-        // 没有验签 = 响应无法采信)。
+        // 没有验签 = 响应无法采信)。与 precreate 探针共用同一道门。
+        let (signer, verifier) = self.require_slots()?;
+        let timestamp = beijing_timestamp(SystemClock.now());
+        let outgoing = build_trade_pay_request(cfg, request, &timestamp, signer.as_ref())?;
+        let headers = vec![(
+            "Content-Type".to_string(),
+            outgoing.content_type.to_string(),
+        )];
+        let raw = self.post(&outgoing.url, &outgoing.body, headers)?;
+        parse_trade_pay_response(&raw, request, verifier.as_ref())
+    }
+
+    /// 真实路径的签名/验签槽位门(pay 与 precreate 探针共用,第二个使用方
+    /// 出现才抽)。返回槽位引用,调用方拿到即证明门已过。
+    fn require_slots(&self) -> Result<SlotRefs<'_>, PaymentError> {
         let signer = self.signer.as_ref().ok_or_else(|| {
             PaymentError::Config(
                 "真实路径必须接签名槽位:商户应用私钥(经 with_signer 接入;账户开通后实签)"
@@ -666,14 +954,51 @@ impl AlipayBackend {
                     .to_string(),
             )
         })?;
+        Ok((signer, verifier))
+    }
+
+    /// L2 网关探针:构建 precreate 报文(env 注入的真密钥签名)→ 真网关 →
+    /// 已验签响应解析。**零资金移动**(预下单只生成二维码,买家不扫码即无
+    /// 资金流),但仍过账本——探针的消费意图由 channel-test 走 WAL 审计行,
+    /// 过账本不豁免(W-52 任务书)。签名/验签槽位缺失 = [`require_slots`]
+    /// 拒绝,零网络。
+    pub fn probe_precreate(
+        &mut self,
+        out_trade_no: &str,
+        amount_cents: u64,
+        subject: &str,
+    ) -> Result<PrecreateProbe, PaymentError> {
+        // clone 出配置再进真实路径(同 trigger_pay 的借用拆法;探针配置仅含
+        // 非密钥标识,克隆廉价)。
+        let cfg = self.real_config.clone().ok_or_else(|| {
+            PaymentError::Config(
+                "precreate 探针只走真实路径(mock 路径没有网关可探;用 from_snapshot_probe 构建)"
+                    .to_string(),
+            )
+        })?;
+        let (signer, verifier) = self.require_slots()?;
+        // 先净化一次给响应对账用;build_precreate_request 内部再净化是无害的
+        // 幂等操作(净化输出只含 [A-Za-z0-9_],再净化逐字节不变)。
+        let out_trade_no = sanitize_out_trade_no(out_trade_no)?;
         let timestamp = beijing_timestamp(SystemClock.now());
-        let outgoing = build_trade_pay_request(cfg, request, &timestamp, signer.as_ref())?;
+        let outgoing = build_precreate_request(
+            &cfg,
+            &out_trade_no,
+            amount_cents,
+            subject,
+            &timestamp,
+            signer.as_ref(),
+        )?;
         let headers = vec![(
             "Content-Type".to_string(),
             outgoing.content_type.to_string(),
         )];
         let raw = self.post(&outgoing.url, &outgoing.body, headers)?;
-        parse_trade_pay_response(&raw, request, verifier.as_ref())
+        let mut probe = parse_precreate_response(&raw, &out_trade_no, verifier.as_ref())?;
+        // 请求原文随探针带回(W-52 取证档用;parse 层拿不到请求,这里补上)。
+        probe.request_url = outgoing.url;
+        probe.request_body = outgoing.body;
+        Ok(probe)
     }
 }
 

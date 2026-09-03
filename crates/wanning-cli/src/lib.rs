@@ -16,12 +16,19 @@
 //!   台账 + 判定实时滚动 + 一键撤销走闸本体;详见 [`ui`] 模块文档)。
 //! - `wanning doctor`:挂载面体检(W-51b,与 `wanning init --install` 合成三命令
 //!   流;真握手 + 账本可写 + 版本一致性 + 缺项清单;详见 [`doctor`] 模块文档)。
+//! - `wanning channel-test`:渠道钥匙验证(W-52,L0→L1→L2→L3 分级阶梯绝不跳级;
+//!   三重明示 fail-closed;定位 = 免密代扣(平台侧)的钥匙验证工具,个人用户旅程
+//!   用不到;详见 [`channel_test`] 模块文档)。
+//! - `wanning confirm`:人在环待支付确认(W-53b,**只在 CLI 人工面**——AI 不能
+//!   确认 AI 自己的支付,确认动作因此绝不出现在 MCP 工具面上;金额一致 / 幂等 /
+//!   TTL 三钉 fail-closed,被拒的确认一行都不落账)。
 //!
 //! 旧 bin 名(`wanning-demo` / `wanning-init` / `wanning-anchor-verify`)保留一个
 //! 发行周期作 alias,全部走同一段 lib 实现,不会漂移成两套行为。
 //!
 //! 退出码纪律:0 成功;2 = 用法错(未知子命令/参数缺失);1 = 运行失败
-//! (护栏拒/坏账/找不到账本)。零网络、零真实消费。
+//! (护栏拒/坏账/找不到账本)。零网络、零真实消费(除 channel-test 的 L2/L3
+//! 显式授权阶梯,该阶梯自身有三重明示 fail-closed)。
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -30,6 +37,7 @@ use wanning_core::clock::{Clock, SystemClock};
 use wanning_demo::anchor_v2;
 use wanning_demo::audit_html;
 
+pub mod channel_test;
 pub mod doctor;
 pub mod ui;
 
@@ -56,6 +64,17 @@ pub const USAGE: &str = "wanning —— Wanning 支付闸(意图层授权;闸今
       挂载面体检(装完 init 之后、第一次开闸之前跑):wanning-mcp 二进制 + 配置条目
       语义 + 真握手(隔离临时账本,零模型零外网零真实消费)+ 账本目录可写 + 真实
       消费就绪度清单 + 版本一致性;每项 ❌ 带 ✗ 修复命令
+  wanning channel-test --channel <名> [--wal <账本>] [--evidence <目录>] [--real] [--real-spend]
+      渠道钥匙验证(L0 环境齐套 → L1 签名自测零网络 → L2 真网关零资金探针 →
+      L3 协议内 0.01 元真实扣款;分级阶梯绝不跳级)。三重明示 fail-closed 缺一即拒
+      (WANNING_ALLOW_REAL_SPEND=1 + --real 显式 + TTY 交互确认;L3 追加 --real-spend)。
+      定位 = 免密代扣(平台侧)的钥匙验证工具,个人用户旅程用不到;京东/微信/美团
+      如实标不支持;详情 --help
+  wanning confirm <单号> --amount <元> --proof <交易号> [--wal <账本>]
+      人在环待支付确认(W-53b,人的显式动作,MCP 工具面绝不出现):闸放行后 AI 把
+      单开在「待支付」,你付完款按本命令把支付凭证入账;金额必须与审批额一致,
+      同一单只能确认一次,过期单拒(被拒的确认一行都不落账)。不给 --wal 读默认
+      账本 ~/.wanning/wal.jsonl(与 `wanning init` 生成的配置同一本账)
   wanning --version    版本
   wanning --help       本帮助
 
@@ -95,6 +114,11 @@ pub fn run_cli(args: &[String]) -> ExitCode {
             doctor::DoctorError::Usage(message) => CmdError::Usage(message),
             doctor::DoctorError::Failed(message) => CmdError::Failed(message),
         })),
+        "channel-test" => finish(channel_test::run(rest).map_err(|e| match e {
+            channel_test::ChannelTestError::Usage(message) => CmdError::Usage(message),
+            channel_test::ChannelTestError::Failed(message) => CmdError::Failed(message),
+        })),
+        "confirm" => finish(confirm_cmd(rest)),
         other => {
             eprintln!("未知子命令 '{other}'。\n{USAGE}");
             ExitCode::from(2)
@@ -196,6 +220,22 @@ fn print_summary(report: &audit_html::AuditReport) {
         "判定: allow {} / deny {}(撤销 {})",
         report.counts.allow, report.counts.deny, report.counts.revoke
     );
+    // W-53a 人在环三段(待支付/确认/终态)有活动才打印:老账本的 stdout
+    // 与 W-53 之前逐字节相同,不制造一次输出漂移;统计与 HTML 回放页的
+    // KPI 瓦片同一来源(report.counts),不另写一套口径。
+    let pending_family = report.counts.pending
+        + report.counts.confirm
+        + report.counts.terminal_completed
+        + report.counts.terminal_voided;
+    if pending_family > 0 {
+        println!(
+            "人在环:待支付 {} / 人确认 {}(完成 {} / 过期作废 {})",
+            report.counts.pending,
+            report.counts.confirm,
+            report.counts.terminal_completed,
+            report.counts.terminal_voided
+        );
+    }
     println!("回放对账:0x{:016x}", report.replay_state_hash);
     println!("链尾: 0x{:016x}", report.chain_tail);
     for delegation in &report.delegations {
@@ -213,6 +253,115 @@ fn print_summary(report: &audit_html::AuditReport) {
         );
     }
     println!("证据以审计原文为准;逐行时间线:`wanning audit <账本> --out <report.html>`。");
+}
+
+// ── confirm:人在环待支付确认(W-53b;只在这一张人工脸上) ────────────────
+
+/// `wanning confirm <单号> --amount <元> --proof <交易号> [--wal <账本>]`。
+///
+/// W-53b 的安全根:**确认是人的显式动作,只存在于这张 CLI 人工面**。AI 侧
+/// (MCP 工具面)能做的止步于提交意图与只读查询——AI 不能确认 AI 自己的支付,
+/// 否则人在环空转(wanning-mcp 的工具清单契约测试断言 confirm 字样零命中)。
+///
+/// 语义钉死(闸本体 [`wanning_core::state::WanningState::confirm_pending`] 的
+/// 三钉原样生效,CLI 不另写一套判定):
+/// 1. **金额一致**:`--amount` 由人亲手照审批额敲——审批 400 确认 500 = 拒
+///    (防夹带,「限制 AI」的本体语义);元→分走 W-50 同一款严格解析
+///    ([`wanning_demo::alipay::yuan_to_cents`],两位小数歧义零容忍,这是钱);
+/// 2. **幂等**:同一单只能确认一次,二次确认 = 拒;
+/// 3. **TTL**:过期单拒(作废本身落一行终态账)。
+///
+/// 被拒的确认一行都不落账(fail-closed);闸只记账不碰钱——支付本身发生在
+/// 用户自己的渠道(手机按指纹等),`--proof` 是那笔支付的凭证,入账供回放对账。
+fn confirm_cmd(args: &[String]) -> Result<(), CmdError> {
+    let mut pending_id: Option<String> = None;
+    let mut amount: Option<String> = None;
+    let mut proof: Option<String> = None;
+    let mut wal: Option<PathBuf> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(());
+            }
+            "--amount" => amount = Some(next_value(args, &mut index, "--amount")?.to_string()),
+            "--proof" => proof = Some(next_value(args, &mut index, "--proof")?.to_string()),
+            "--wal" => wal = Some(next_path(args, &mut index, "--wal")?),
+            other => {
+                if other.starts_with('-') {
+                    return Err(CmdError::Usage(format!(
+                        "未知参数 '{other}'(用法:wanning confirm <单号> --amount <元> \
+                         --proof <交易号> [--wal <账本>])"
+                    )));
+                }
+                if pending_id.is_some() {
+                    return Err(CmdError::Usage("待支付单号只给一个(位置参数)".to_string()));
+                }
+                pending_id = Some(other.to_string());
+            }
+        }
+        index += 1;
+    }
+    let pending_id = pending_id.ok_or_else(|| {
+        CmdError::Usage("缺少待支付单号(形如 p-…,来自闸放行回执/待支付查询)".to_string())
+    })?;
+    let amount = amount.ok_or_else(|| {
+        CmdError::Usage("缺少 --amount <元>(必须照审批额敲,分文不差)".to_string())
+    })?;
+    let proof = proof.ok_or_else(|| {
+        CmdError::Usage("缺少 --proof <交易号>(支付凭证,回放对账靠它)".to_string())
+    })?;
+    if proof.trim().is_empty() {
+        return Err(CmdError::Usage(
+            "--proof 支付凭证为空:没有凭证的确认不是可对账的确认".to_string(),
+        ));
+    }
+    // 元 → 分:W-50 同一款严格解析(0/1/2 位小数;负号/空白/三位小数一律拒)。
+    // 人的手滑在这里挡下,绝不带歧义金额进闸。
+    let amount_cents = wanning_demo::alipay::yuan_to_cents(&amount)
+        .map_err(|e| CmdError::Usage(format!("--amount 金额不合法: {e}")))?;
+
+    // 不给路径 = 产品默认账本(与 `wanning init` 生成的宿主配置同一本账);
+    // 家目录解析不出 = fail-closed,绝不猜一个落点。
+    let wal = match wal {
+        Some(wal) => wal,
+        None => wanning_core::paths::default_wal_path().ok_or_else(|| {
+            CmdError::Failed(
+                "解析不出默认账本路径(WANNING_HOME / USERPROFILE / HOME 都没有)。\
+                 用 `wanning confirm <单号> --amount <元> --proof <凭证> --wal <账本>` 显式给一个"
+                    .to_string(),
+            )
+        })?,
+    };
+    if !wal.exists() {
+        return Err(CmdError::Failed(format!(
+            "审计账本不存在:{}(这张待支付单是哪个闸开的,就确认哪本账)",
+            slash(&wal)
+        )));
+    }
+
+    // live_resuming:先整链回放对账,再接旧账续写(确认行 + 终态行)。
+    // 闸正被宿主进程占着(单写者锁)时这里拿不到锁,fail-closed 报给人工。
+    let mut state = wanning_core::state::WanningState::live_resuming(&wal)
+        .map_err(|e| CmdError::Failed(format!("账本打开失败(fail-closed): {e}")))?;
+    let order = state
+        .confirm_pending(&pending_id, amount_cents, proof.trim())
+        .map_err(|e| CmdError::Failed(format!("确认被拒(fail-closed,一行未落账): {e}")))?;
+
+    println!("待支付单已确认:{pending_id}");
+    println!(
+        "  金额: ¥{}(确认额 = 审批额,分文不差)",
+        wanning_demo::alipay::cents_to_yuan_amount(order.approved_amount_cents)
+    );
+    println!("  支付凭证: {}", order.proof.as_deref().unwrap_or("-"));
+    println!("  状态: {:?}(确认行 + 终态行已落账)", order.state);
+    println!(
+        "  账本:{}(完整性链逐行验证通过;逐段回放:`wanning audit {} --out <report.html>`)",
+        slash(&wal),
+        slash(&wal)
+    );
+    Ok(())
 }
 
 // ── anchor-verify:第三方零密钥验签(ed25519 v2,W-31) ───────────────────
