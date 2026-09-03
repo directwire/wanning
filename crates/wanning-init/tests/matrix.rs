@@ -83,7 +83,7 @@ fn slash(p: &Path) -> String {
 #[test]
 fn claude_code_output_matches_repo_field_face() {
     let repo: Value = serde_json::from_str(
-        &fs::read_to_string(format!("{REPO_ROOT}/.mcp.json")).expect("读现物"),
+        &fs::read_to_string(format!("{REPO_ROOT}/docs/examples/claude-code.mcp.json")).expect("读现物"),
     )
     .expect("现物是合法 JSON");
     let bin_dir = temp_dir("cc-bin");
@@ -132,7 +132,7 @@ fn claude_code_output_matches_repo_field_face() {
 #[test]
 fn trae_output_matches_repo_field_face() {
     let repo: Value = serde_json::from_str(
-        &fs::read_to_string(format!("{REPO_ROOT}/.trae/mcp.json")).expect("读现物"),
+        &fs::read_to_string(format!("{REPO_ROOT}/docs/examples/trae.mcp.json")).expect("读现物"),
     )
     .expect("现物是合法 JSON");
     let bin_dir = temp_dir("trae-bin");

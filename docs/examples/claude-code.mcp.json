@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "wanning": {
+      "type": "stdio",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "-p",
+        "wanning-mcp",
+        "--",
+        "--wal",
+        "${CLAUDE_PROJECT_DIR:-.}/target/mcp-demo.wal"
+      ]
+    }
+  }
+}
