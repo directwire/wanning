@@ -14,6 +14,8 @@
 //! - `wanning anchor-verify`:第三方零密钥验锚点(ed25519 v2,W-31)。
 //! - `wanning ui`:本地只读仪表盘(W-43b,127.0.0.1 随机端口不监听外网;预算
 //!   台账 + 判定实时滚动 + 一键撤销走闸本体;详见 [`ui`] 模块文档)。
+//! - `wanning doctor`:挂载面体检(W-51b,与 `wanning init --install` 合成三命令
+//!   流;真握手 + 账本可写 + 版本一致性 + 缺项清单;详见 [`doctor`] 模块文档)。
 //!
 //! 旧 bin 名(`wanning-demo` / `wanning-init` / `wanning-anchor-verify`)保留一个
 //! 发行周期作 alias,全部走同一段 lib 实现,不会漂移成两套行为。
@@ -28,15 +30,18 @@ use wanning_core::clock::{Clock, SystemClock};
 use wanning_demo::anchor_v2;
 use wanning_demo::audit_html;
 
+pub mod doctor;
 pub mod ui;
 
 pub const USAGE: &str = "wanning —— Wanning 支付闸(意图层授权;闸今天就能用,通道等你插钥匙)
 
 用法: wanning <子命令> [参数]
 
-  wanning init --platform <名> [--bin <路径>] [--wal <路径>] [--out <文件>]
+  wanning init --platform <名> [--bin <路径>] [--wal <路径>] [--out <文件> | --install]
       给编码工具生成 MCP 配置(claude-code / codex / kimi / trae / workbuddy /
-      deepseek-harness),写实路径零占位符,装完即用;详情 `wanning init --help`
+      deepseek-harness / openclaw / hermes),写实路径零占位符,装完即用;
+      `--install` 直写宿主配置的正确位置(merge 只动 wanning 条目,写前备份,
+      `--dry-run` 零落盘预览;codex 拒装给人工指引);详情 `wanning init --help`
   wanning audit [<账本路径>] [--out <report.html>]
       读审计账本汇总(行数 / 判定 / 链尾 / 预算台账);不给路径读默认账本
       ~/.wanning/wal.jsonl;--out 同时导出自包含 HTML 回放页(坏账绝不产出)
@@ -47,6 +52,10 @@ pub const USAGE: &str = "wanning —— Wanning 支付闸(意图层授权;闸今
       滚动 / 一键撤销(走闸本体,落审计);页面零 JS,自动刷新
   wanning anchor-verify --anchor <anchor.json> --wal <audit.jsonl> [--expect-key <64位hex>]
       第三方零密钥验锚点(ed25519 v2;公钥随锚点走,无需任何密钥文件)
+  wanning doctor [--platform <名>]
+      挂载面体检(装完 init 之后、第一次开闸之前跑):wanning-mcp 二进制 + 配置条目
+      语义 + 真握手(隔离临时账本,零模型零外网零真实消费)+ 账本目录可写 + 真实
+      消费就绪度清单 + 版本一致性;每项 ❌ 带 ✗ 修复命令
   wanning --version    版本
   wanning --help       本帮助
 
@@ -81,6 +90,10 @@ pub fn run_cli(args: &[String]) -> ExitCode {
         "ui" => finish(ui::run(rest).map_err(|e| match e {
             ui::UiStartError::Usage(message) => CmdError::Usage(message),
             ui::UiStartError::Failed(message) => CmdError::Failed(message),
+        })),
+        "doctor" => finish(doctor::run(rest).map_err(|e| match e {
+            doctor::DoctorError::Usage(message) => CmdError::Usage(message),
+            doctor::DoctorError::Failed(message) => CmdError::Failed(message),
         })),
         other => {
             eprintln!("未知子命令 '{other}'。\n{USAGE}");

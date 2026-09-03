@@ -9,6 +9,17 @@
 > 完整性链连续)。真实模型会话待所有者放行(红线 2)。
 > 本机实测基线:hermes **v0.19.1**(2026-07-30)。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform hermes --install`:产出并执行本页的
+  `hermes mcp add wanning --command … --args …`——**缺省只打印命令行**,加
+  `--yes` 才代执行(非 TTY 确认提示自动喂 `y` 后关写端,W-45 实测形态;宿主
+  解析不到或退出码非 0 = fail-closed)。
+- `wanning doctor --platform hermes`:装完体检六项(二进制/配置语义/真握手/
+  账本目录可写/真实消费就绪度/版本一致性),从 `$HERMES_HOME/config.yaml`
+  容忍式读 `wanning:` 块;每项 ❌ 带 ✗ 修复命令;真握手用隔离临时账本,零模型
+  零外网零真实消费。
+
 ## Hermes 是什么
 
 Nous Research 开源 agent harness(Python)。**原生支持 MCP**:`hermes mcp`

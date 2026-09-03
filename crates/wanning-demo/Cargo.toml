@@ -12,8 +12,14 @@ default-run = "wanning-demo"
 [dependencies]
 wanning-core.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# raw_value feature(W-50):同步响应验签必须拿 `alipay_trade_pay_response` 成员的
+# 逐字节原文(RawValue 保真),不能经过 Value 归一化。
+serde_json = { workspace = true, features = ["raw_value"] }
 ureq.workspace = true
+# W-50 支付宝真实报文模板:base64(sign 编解码)+ percent-encoding(表单/URL 编码)。
+# 两 crate 已在依赖树里(ureq 的传递依赖),这里只声明直用,**零新增 crate**。
+base64 = "0.22"
+percent-encoding = "2.3"
 # W-31(A 案,本仓第一个运行时外部加密依赖):审计锚点 v2 的 ed25519 签名/验签。
 # 非对称签名手写不可接受——哈希能手写因为 spec 短、向量密;曲线实现边缘 case
 # 致命。只进本 crate(所有者侧工具面):core/闸/MCP/SDK 依赖树零增长。

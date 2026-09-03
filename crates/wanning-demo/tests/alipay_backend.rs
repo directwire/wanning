@@ -319,7 +319,7 @@ fn notify_parse_refuses_reports_without_reconcilable_ids() {
 }
 
 #[test]
-fn real_path_requires_guard_and_endpoint() {
+fn real_path_requires_guard_and_alipay_config() {
     // ① 全空 env:被护栏拦下。
     let err = AlipayBackend::from_snapshot_real(&EnvSnapshot::default()).unwrap_err();
     assert!(matches!(err, PaymentError::GuardBlocked(_)), "{err}");
@@ -328,7 +328,7 @@ fn real_path_requires_guard_and_endpoint() {
         "{err}"
     );
 
-    // ② 护栏 env 全齐但端点未知(今晚真相):拒配,不臆造支付宝 URL。
+    // ② 护栏 env 全齐但缺 app_id(W-50 起 fail-closed 链第二级)。
     let mut env = EnvSnapshot::default();
     env.insert("WANNING_ALLOW_REAL_SPEND", "1");
     env.insert("WANNING_GLM_KEY", "k");
@@ -337,14 +337,23 @@ fn real_path_requires_guard_and_endpoint() {
     env.insert("WANNING_JD_ACCESS_TOKEN", "k");
     let err = AlipayBackend::from_snapshot_real(&env).unwrap_err();
     assert!(matches!(err, PaymentError::Config(_)), "{err}");
-    assert!(err.to_string().contains("WANNING_ALIPAY_ENDPOINT"), "{err}");
+    assert!(err.to_string().contains("WANNING_ALIPAY_APP_ID"), "{err}");
 
-    // ③ 全齐(端点指向本地 mock):完整真实形路径可用,且全程零外网。
-    let mock = spawn_json_mock(vec![(200, mock_pay_body("success"))]);
-    env.insert("WANNING_ALIPAY_ENDPOINT", &mock.url());
-    let mut backend = AlipayBackend::from_snapshot_real(&env).expect("全齐应构建成功");
-    let result = backend.trigger_pay(&pay_request()).expect("扣款成功");
-    assert_eq!(result.status, PayStatus::Success);
+    // ③ 缺签约协议号:协议内扣款语义 = 没有协议号的扣款绝不发。
+    env.insert("WANNING_ALIPAY_APP_ID", "2021000100000000");
+    let err = AlipayBackend::from_snapshot_real(&env).unwrap_err();
+    assert!(matches!(err, PaymentError::Config(_)), "{err}");
+    assert!(
+        err.to_string().contains("WANNING_ALIPAY_AGREEMENT_NO"),
+        "{err}"
+    );
+
+    // ④ 全齐:网关默认官方地址(W-50 [公开文档直核];端点 env 可覆盖,见
+    //    tests/alipay_real.rs 的覆盖断言)。真实扣款报文的端到端测试在
+    //    tests/alipay_real.rs(官方响应向量 + 测试密钥对扮演两端)。
+    env.insert("WANNING_ALIPAY_AGREEMENT_NO", "20170322450983769228");
+    let backend = AlipayBackend::from_snapshot_real(&env).expect("全齐应构建成功");
+    assert_eq!(backend.endpoint(), "https://openapi.alipay.com/gateway.do");
 }
 
 #[test]

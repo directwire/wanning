@@ -10,6 +10,17 @@
 > 配置面（W-45）+ agent 回合工具现身与判定落 WAL（W-47）。
 > 本机实测基线：OpenClaw **2026.5.22**（commit a374c3a）。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform openclaw --install`:产出并执行本页的
+  `openclaw mcp set wanning '<payload>'`——payload 从生成器命令行原样剥出
+  (打印与执行同源);**缺省只打印命令行**,加 `--yes` 才代执行(执行前解析
+  宿主真实路径,`--host-bin` 显式指定优先,解析不到或退出码非 0 = fail-closed)。
+- `wanning doctor --platform openclaw`:装完体检六项(二进制/配置语义/真握手/
+  账本目录可写/真实消费就绪度/版本一致性),从 `$OPENCLAW_STATE_DIR/openclaw.json`
+  读 `mcp.servers.wanning`;每项 ❌ 带 ✗ 修复命令;真握手用隔离临时账本,零模型
+  零外网零真实消费。
+
 ## OpenClaw 是什么
 
 开源个人 agent 框架（gateway + 多渠道消息接入 + 本地 agent 回合）。**原生支持

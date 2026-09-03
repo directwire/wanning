@@ -5,6 +5,15 @@
 > 额度的动作一律所有者亲自)。
 > 本机实测基线:codex-cli **0.133.0**(npm 全局);官方文档另有 0.152.1 可升级。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform codex --install`:**不支持,fail-closed**——codex 主配置
+  `config.toml` 是 TOML 文本面,文本合并的风险大于收益,报错给 `--out` 人工指引
+  (生成片段后按本页「配置现物」人工追加);绝不乱写主配置。
+- `wanning doctor --platform codex`:体检可跑——从 `$CODEX_HOME/config.toml` 容忍式
+  读 `[mcp_servers.wanning]` 段,六项检查同其他平台(真握手用隔离临时账本,零模型
+  零外网零真实消费;每项 ❌ 带 ✗ 修复命令)。
+
 ## 安装(所有者还没装的话)
 
 ```powershell

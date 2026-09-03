@@ -5,6 +5,15 @@
 > 状态:**官方 MCP 支持已直核 + 生成器已入矩阵;真插实测待所有者装桌面端**。
 > 传输形态是推断(官方未明示 stdio/HTTP 字样)——待实测清单第一项。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform workbuddy --install`:把本页配置直写进项目根
+  `.workbuddy/mcp.json`——merge 只动 `mcpServers.wanning` 条目,他人条目不动,
+  写前备份 `<file>.wanning.bak`,升级打字段级 diff,`--dry-run` 零落盘预览。
+- `wanning doctor --platform workbuddy`:装完体检六项(二进制/配置语义/真握手/
+  账本目录可写/真实消费就绪度/版本一致性),每项 ❌ 带 ✗ 修复命令;真握手用隔离
+  临时账本,零模型零外网零真实消费。
+
 ## 它是什么(先破冰再谈接入)
 
 - **腾讯出品的全场景 AI 办公工作台**(桌面应用,Win/Mac;W-37 直核官方

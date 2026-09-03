@@ -9,6 +9,17 @@
 > 会话级端到端待所有者放行（dsh 会话 = 模型会话 + 网络，红线 2）**。
 > 本机实测基线：dsh **0.1.0-rc.7**（npm 全局 `@deepseek-ai/dsh`，`dsh --version` 实测）。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform deepseek-harness --install`:把本页的 `- insert:` 块
+  合并追加进 `$DSH_HOME/cordis.patch.yml`——顶层块级扫描,他人块逐字节保留
+  (W-44 纪律:append 勿整文件覆盖),wanning 块替换发生在原位置,写前备份
+  `<file>.wanning.bak`,`--dry-run` 零落盘预览;`DSH_HOME` 未设 = 不猜落点拒装。
+- `wanning doctor --platform deepseek-harness`:装完体检六项(二进制/配置语义/
+  真握手/账本目录可写/真实消费就绪度/版本一致性),从 cordis.patch.yml 读
+  `id: wanning-gate` 块;每项 ❌ 带 ✗ 修复命令;真握手用隔离临时账本,零模型
+  零外网零真实消费。
+
 ## dsh 是什么
 
 DeepSeek 官方开源 agent harness（TypeScript，MIT，developer preview，

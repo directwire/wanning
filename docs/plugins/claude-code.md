@@ -6,6 +6,17 @@
 > `codex.md`/`kimi.md`/`trae.md`/`workbuddy.md` 各自的阻塞清单)。
 > 本机实测基线:Claude Code **2.1.234**(Windows 11,仓库根裸 `claude -p`)。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform claude-code --install`:把本页配置直写进项目根
+  `.mcp.json`——merge 只动 `mcpServers.wanning` 条目,他人条目不动,写前备份
+  `<file>.wanning.bak`,升级打字段级 diff,`--dry-run` 零落盘预览;不带
+  `--install` 的只打印行为不变(W-36 契约)。
+- `wanning doctor --platform claude-code`:装完体检六项——① wanning-mcp 二进制
+  + 版本、② 配置条目语义、③ **真握手**(隔离临时账本走 initialize → tools/list,
+  绝不碰配置里写的账本)、④ 账本目录可写、⑤ 真实消费就绪度(只读 env,信息项)、
+  ⑥ 版本一致性;每项 ❌ 带 ✗ 修复命令。零模型零外网零真实消费。
+
 ## 安装(所有者已经装了)
 
 本机已有 Claude Code 2.1.234,无需任何安装动作。验证:

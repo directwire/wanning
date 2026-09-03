@@ -67,16 +67,25 @@ cargo install --path crates/wanning-cli      # wanning 二进制进 $CARGO_HOME/
 wanning --version
 ```
 
-**装完第一步**(北极星:进仓到闸口在跑 ≤10 分钟):
+**装完第一步**(北极星:进仓到闸口在跑 ≤10 分钟;W-51 起三命令流):
 
 ```bash
-wanning init --platform claude-code   # 或 codex / kimi / trae / workbuddy / deepseek-harness / openclaw / hermes
-# 输出即贴进对应平台的 MCP 配置;写实路径零占位符,默认账本 ~/.wanning/wal.jsonl
+wanning init --platform claude-code --install   # 或 codex / kimi / trae / workbuddy / deepseek-harness / openclaw / hermes
+# ① 直写进对应宿主的正确位置(不再手动贴):merge 只动 mcpServers.wanning 条目,
+#   他人条目不动,写前备份 <file>.wanning.bak;--dry-run 先预览零落盘
+#   (codex 主配置是 TOML 文本面,--install 拒装,给 --out 人工指引;
+#   openclaw/hermes 默认只打印宿主命令行,--yes 才代执行)
+wanning doctor --platform claude-code           # ② 体检:二进制+配置语义+真握手
+#   (隔离临时账本,零模型零外网零真实消费)+账本目录可写+真实消费就绪度+版本一致
+#   六项检查,每项 ❌ 带 ✗ 修复命令;全绿再重启你的编码工具
 # 重启你的编码工具 → 闸的两件工具(wanning_gate_evaluate / wanning_audit_tail)出现
 # 让 agent 试一笔超额消费 → 应被拒(reason=over_budget,账本不动)
-wanning audit                         # 看账本:行数/判定/链尾/预算台账
-wanning ui                            # 本地仪表盘:127.0.0.1 随机端口,零 JS 自动刷新
+wanning audit                                   # ③ 看账本:行数/判定/链尾/预算台账
+wanning ui                                      # 本地仪表盘:127.0.0.1 随机端口,零 JS 自动刷新
 ```
+
+不想直写的老用法照旧:`wanning init --platform <名>`(不带 `--install`)只打印
+配置内容,输出即贴进对应平台——行为与 W-36 契约一致,零文件副作用。
 
 ## Quickstart(全离线,零真实消费,5 分钟)
 
@@ -112,6 +121,20 @@ dsh 二进制 `--dump-config --patch` 组合实测);openclaw / hermes 按 W-45 �
 **W-43a 起写实路径零占位符**:配置直写解析出的 wanning-mcp 绝对路径与审计账本
 真实路径(默认 `~/.wanning/wal.jsonl`,Windows `%USERPROFILE%\.wanning`,目录自动创建),
 默认预算 1000 分 + 每日 10 笔速率护栏随配置落 args(用户可改),拿到就能用不必手改。
+**W-51a `--install` 直写安装**:上述断点①(生成后还要手动贴配置)收掉——
+`wanning init --platform <名> --install` 把配置写进对应宿主的正确位置(四 mcp.json
+平台 merge 进 `mcpServers.wanning`、dsh 合并追加 cordis.patch.yml 他人块逐字节保留、
+openclaw/hermes 产出并仅 `--yes` 时执行宿主 CLI);写前读现物 → 先备份
+`<file>.wanning.bak` → 升级打字段级 diff → 已装齐逐字节不动 → `--dry-run` 零落盘;
+codex 主配置是 TOML 文本面,fail-closed 拒装给 `--out` 人工指引。条目内容与生成器
+产物同源(单一事实来源),契约测试锁死。
+
+**统一 CLI 入口**(W-43a):`cargo install wanning-cli`(或仓内 `cargo run -p wanning-cli -- …`)
+收拢单一入口 `wanning`——`wanning init --platform <名>`(八平台同上,缺 wanning-mcp
+时报错给安装指引;`--install` 直写见上)、`wanning doctor --platform <名>`(W-51b
+挂载面体检六项:二进制/配置语义/**真握手**/账本目录可写/真实消费就绪度/版本一致性,
+每项 ❌ 带 ✗ 修复命令;零模型零外网零真实消费)、`wanning audit [<账本>] [--out <report.html>]`(读账本汇总:
+行数/判定/链尾/预算台账;坏账 fail-closed 拒读;`--out` 同时导出审计回放页)、
 
 **统一 CLI 入口**(W-43a):`cargo install wanning-cli`(或仓内 `cargo run -p wanning-cli -- …`)
 收拢单一入口 `wanning`——`wanning init --platform <名>`(八平台同上,缺 wanning-mcp
@@ -155,7 +178,7 @@ W-07 在直通路径原样生效;`wanning ui [--wal <账本>] [--port <端口>]`
 
 ```bash
 cargo run -p wanning-demo -- --export-audit <审计文件.jsonl> --out audit.html
-# 浅/深双主题截图:docs/tasks/w22-audit-replay.png / w22-audit-replay-dark.png
+# 浅/深双主题截图在档(W-22 取证)
 ```
 
 **所有者侧审计锚点(W-23)**:W-21 完整性链有两个本地验不住的盲区——**只改最后一行内容**
@@ -256,9 +279,9 @@ gate.self_check()?;                        // 验链+回放对账,三条口径�
 
 | 阶段 | 交付 | 状态 |
 |---|---|---|
-| P0 | CLI 闭环 demo:GLM 决策 + 闸 + 支付宝免密/京东开放平台真实小额下单(四卖点实测) | **离线闭环完成**(四卖点+回放对账+护栏/adapter mock 全测试;**预算策略层落地** W-27:速率/类目/商户/时段四维确定性策略;**性能基线** W-30:判定 ~1.2M/s、WAL 追加 ~0.33M 行/s、回放 ~0.42M 行/s,`docs/benchmarks.md`);真实小额下单待账户开通。**产品化首砖+W-43a/W-43b**:统一
+| P0 | CLI 闭环 demo:GLM 决策 + 闸 + 支付宝免密/京东开放平台真实小额下单(四卖点实测) | **离线闭环完成**(四卖点+回放对账+护栏/adapter mock 全测试;**预算策略层落地** W-27:速率/类目/商户/时段四维确定性策略;**性能基线** W-30:判定 ~1.2M/s、WAL 追加 ~0.33M 行/s、回放 ~0.42M 行/s,`docs/benchmarks.md`);真实小额下单待账户开通——**支付宝官方报文模板已按公开文档填实**(W-50:签名/验签/网关/字段全直核 + ANAI 实战双源交叉,调研在档;开户后只剩「实签验证」一步);**京东 VOP 公开面复核**(W-50:支付 4 接口全字段/错误码表直核,签名算法公开面查不到,保持契约占位,调研在档含开户后人工核清单)。**产品化首砖+W-43a/W-43b**:统一
 CLI 入口 `wanning`(init/audit/demo/anchor-verify/ui,默认账本 ~/.wanning)、
 本地只读仪表盘 `wanning ui` |
-| P1 | 闸做成 **MCP server**——Claude Code / Kimi / Trae 等真实平台真插 | 骨架+协议边界加固完成;**Claude Code 真插实测通过**(2026-09-02,W-19);**Codex 配置面免登录实测 + 插件页落地**(W-35,`docs/plugins/codex.md`,生成的 TOML 已实证可启动闸;会话级待 OpenAI 登录);**Kimi Code CLI 挂法+闸往返本机实测**(W-40:0.39.1 无 `kimi mcp` 子命令→`.kimi-code/mcp.json` 挂法,隔离 `KIMI_CODE_HOME` 下真二进制完成 allow/replay/over_budget 三判定落 WAL,模型侧本地 mock,真实模型会话复证待所有者放行烧额度——登录凭证 2026-08-30 已在档,`kimi login` 大概率可省(W-42 修正),`docs/plugins/kimi.md`);**WorkBuddy 调研破冰**(W-37:腾讯 AI 办公工作台,支持 MCP,`.workbuddy/mcp.json`,生成器已入矩阵,真插待桌面端);Trae 实测被 GUI 挡;**DeepSeek Harness 接入**(W-44:Cordis overlay patch 生成器分支 + 插件页,本机 dsh 0.1.0-rc.7 `--dump-config --patch` 实测接受,会话级待所有者放行);**OpenClaw + Hermes 接入**(W-45:两宿主原生支持 MCP,`openclaw mcp set`/`hermes mcp add` 生成器分支 + 插件页,真宿主隔离实测——hermes **全链路**:挂载 2/2 工具发现 + one-shot agent 回合经 `tool_call` 间接层 → allow 400 落 WAL、同 nonce replay 拒;openclaw 配置面 + mock 模型注册绿,agent 回合 **W-47 收口**:静默退出根因查明(缺 `-m`/缺会话选择器/cwd 扫描税),隔离 mock 真回合工具现身 `wanning__*`、allow/replay 落 WAL、链连续);**八平台配置生成器**(`wanning-init`,W-36/W-44/W-45) |
+| P1 | 闸做成 **MCP server**——Claude Code / Kimi / Trae 等真实平台真插 | 骨架+协议边界加固完成;**Claude Code 真插实测通过**(2026-09-02,W-19);**Codex 配置面免登录实测 + 插件页落地**(W-35,`docs/plugins/codex.md`,生成的 TOML 已实证可启动闸;会话级待 OpenAI 登录);**Kimi Code CLI 挂法+闸往返本机实测**(W-40:0.39.1 无 `kimi mcp` 子命令→`.kimi-code/mcp.json` 挂法,隔离 `KIMI_CODE_HOME` 下真二进制完成 allow/replay/over_budget 三判定落 WAL,模型侧本地 mock,真实模型会话复证待所有者放行烧额度——登录凭证 2026-08-30 已在档,`kimi login` 大概率可省(W-42 修正),`docs/plugins/kimi.md`);**WorkBuddy 调研破冰**(W-37:腾讯 AI 办公工作台,支持 MCP,`.workbuddy/mcp.json`,生成器已入矩阵,真插待桌面端);Trae 实测被 GUI 挡;**DeepSeek Harness 接入**(W-44:Cordis overlay patch 生成器分支 + 插件页,本机 dsh 0.1.0-rc.7 `--dump-config --patch` 实测接受,会话级待所有者放行);**OpenClaw + Hermes 接入**(W-45:两宿主原生支持 MCP,`openclaw mcp set`/`hermes mcp add` 生成器分支 + 插件页,真宿主隔离实测——hermes **全链路**:挂载 2/2 工具发现 + one-shot agent 回合经 `tool_call` 间接层 → allow 400 落 WAL、同 nonce replay 拒;openclaw 配置面 + mock 模型注册绿,agent 回合 **W-47 收口**:静默退出根因查明(缺 `-m`/缺会话选择器/cwd 扫描税),隔离 mock 真回合工具现身 `wanning__*`、allow/replay 落 WAL、链连续);**八平台配置生成器**(`wanning-init`,W-36/W-44/W-45);**三命令流收口**(W-51:`init --install` 直写宿主配置消手动贴 + `wanning doctor` 六项体检消「通没通自己试」,装完即用) |
 | P2 | SDK + 微信通道 + 对外样板 | **SDK 完成**(W-25);审计回放页(W-22)/所有者侧锚点(W-23,**v2 ed25519 第三方零密钥可验** W-31,独立 bin `wanning-anchor-verify`)/微信调研(W-24)+ **微信 adapter 骨架**(W-27,W-24 直核字段落代码;接入待账户开通);**美团 adapter 契约占位**(W-39,W-38 结论=查不到用户侧免密/代扣 API,管线照建契约体留空);**四渠道×四工具矩阵 mock 备妥**(W-39,矩阵在档);剩对外样板录像 |
 | P3 | 标准输出:拿协议谈开放平台/银行 | **白皮书第一稿完成**(2026-09-02,W-26,在档);拿协议谈待所有者 |

@@ -19,6 +19,7 @@ const USAGE: &str = "wanning-mcp:Wanning 支付闸的 MCP server(stdio,零网络
   --cap-cents <分>  旧名,与 --budget 同义(两个同时给 = 拒,两义性 fail-closed)。
   --max-spends <n>  速率护栏:滑动窗内至多 n 笔成功放行,默认 10;0 = 关掉护栏。
   --hours <小时>    演示委托的有效时长,默认 24(从启动时刻起)。
+  -V / --version    打印版本后退出(wanning doctor 的 ①/⑥ 检查靠它读版本)
   -h / --help       打印本说明后退出
 ";
 
@@ -104,6 +105,12 @@ fn next_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, 
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // --version 短路在 parse_args 之前:版本探测不能要求 --wal(W-51b doctor 的
+    // ①/⑥ 只问「你是谁、哪个版本」,不该为了问版本就要一份账本)。
+    if args.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("wanning-mcp {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let config = match parse_args(&args) {
         Ok(Some(config)) => config,
         Ok(None) => {

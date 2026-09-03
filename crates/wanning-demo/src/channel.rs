@@ -109,7 +109,8 @@ pub struct PayResult {
     pub amount_cents: u64,
 }
 
-/// 渠道侧回调通知(已解析;**原始报文必须先验签**,见各渠道模块 TODO)。
+/// 渠道侧回调通知(已解析;**原始报文必须先验签**——支付宝走
+/// [`crate::alipay::verify_pay_notify`],W-50 官方规则填实)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayNotify {
     pub out_request_no: String,
@@ -119,9 +120,11 @@ pub struct PayNotify {
 }
 
 impl PayNotify {
-    /// 从渠道无关报文解析(支付宝 mock 契约用)。渠道特有校验(如微信的 PAP
-    /// 交易类型)在各自模块做。TODO(账户开通后):本函数只做解析,上游必须在调用
-    /// [`apply_pay_notify`] 前完成验签;验签不过的报文一律丢弃并告警(fail-closed)。
+    /// 从渠道无关报文解析(本地 mock 契约用)。渠道特有校验(如微信的 PAP
+    /// 交易类型)在各自模块做。**验签前置门在渠道侧**:支付宝走
+    /// [`crate::alipay::verify_pay_notify`](W-50 官方规则填实,原始 form 报文
+    /// 先验签、验签通过才产出本类型)——本函数只做渠道无关解析,绝不替代验签;
+    /// 验签不过的报文一律丢弃并告警(fail-closed)。
     pub fn parse(raw: &str) -> Result<Self, PaymentError> {
         let notify: PayNotify = serde_json::from_str(raw).map_err(|e| {
             PaymentError::BadResponse(format!("回调报文解析失败: {e};原文: {raw:.200}"))
@@ -215,6 +218,18 @@ pub enum PaymentError {
     GuardBlocked(String),
     /// 配置缺失(如真端点/签约协议未知)。
     Config(String),
+    /// 渠道网关明确拒绝(W-50 支付宝填实):2xx + 已验签响应里 code≠10000 的
+    /// 业务失败(如 40004 + ACQ.* sub_code)。与 [`PaymentError::BadResponse`]
+    /// 刻意分开——BadResponse = 响应无法采信(验签不过/缺字段/对不上账),
+    /// GatewayRejected = 网关**可信地**拒绝了这笔扣款,码值可落审计逐条追因。
+    GatewayRejected {
+        /// 网关返回码(如 "40004" 业务处理失败 / "20000" 服务不可用)。
+        code: String,
+        /// 业务错误码(如 ACQ.AGREEMENT_INVALID),可能缺省。
+        sub_code: Option<String>,
+        /// 人类可读描述,可能缺省。
+        sub_msg: Option<String>,
+    },
 }
 
 impl fmt::Display for PaymentError {
@@ -226,6 +241,16 @@ impl fmt::Display for PaymentError {
             PaymentError::BadResponse(m) => write!(f, "响应不符合契约: {m}"),
             PaymentError::GuardBlocked(m) => write!(f, "真实路径被护栏挡下(fail-closed): {m}"),
             PaymentError::Config(m) => write!(f, "adapter 配置缺失: {m}"),
+            PaymentError::GatewayRejected {
+                code,
+                sub_code,
+                sub_msg,
+            } => write!(
+                f,
+                "渠道网关拒绝这笔扣款:code={code} sub_code={} sub_msg={}",
+                sub_code.as_deref().unwrap_or("-"),
+                sub_msg.as_deref().unwrap_or("-")
+            ),
         }
     }
 }

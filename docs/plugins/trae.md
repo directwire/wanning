@@ -6,6 +6,15 @@
 > (2026-09-02 实测 `%LOCALAPPDATA%\Programs` 下无 Trae 目录)。所有者装好后按
 > 本页「待实测清单」逐项收口,预计 15 分钟(待实测清单)。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform trae --install`:把本页配置直写进项目根
+  `.trae/mcp.json`——merge 只动 `mcpServers.wanning` 条目,他人条目不动,写前备份
+  `<file>.wanning.bak`,升级打字段级 diff,`--dry-run` 零落盘预览。
+- `wanning doctor --platform trae`:装完体检六项(二进制/配置语义/真握手/账本
+  目录可写/真实消费就绪度/版本一致性),每项 ❌ 带 ✗ 修复命令;真握手用隔离临时
+  账本,零模型零外网零真实消费。
+
 ## 安装(所有者还没装)
 
 - 本机未装 Trae;官方渠道下载桌面端(装哪台机/哪个盘由所有者定,

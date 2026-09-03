@@ -7,7 +7,7 @@
 
 ## Claude Code(已真插实测通过,W-19)
 
-现物在仓库根 `.mcp.json`:
+现物在 `docs/examples/claude-code.mcp.json`:
 
 ```json
 {
@@ -24,7 +24,7 @@
 }
 ```
 
-- 挂载即生效:无头 `claude -p` 会按仓库 `.mcp.json` 自动连接(status=connected,
+- 挂载即生效:无头 `claude -p` 会按项目根 `.mcp.json` 自动连接(status=connected,
   无批准/无信任/无额外 flag,W-19 取证)。
 - `${CLAUDE_PROJECT_DIR}` 展开为项目根;`${CLAUDE_PROJECT_DIR:-.}` 给了兜底。
 - 实测证据:W-19 放行 → 重放拒 → 审计对账三步(在档取证)。
@@ -32,7 +32,7 @@
 
 ## Trae(配置已备,待真插实测)
 
-现物在仓库 `.trae/mcp.json`:
+现物在 `docs/examples/trae.mcp.json`:
 
 ```json
 {

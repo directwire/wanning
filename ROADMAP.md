@@ -13,6 +13,10 @@
   hermes / openclaw 八平台(`wanning-init`)
 - 产品化三件:开箱默认值(默认账本路径 + 默认预算策略,零配置可用)/ 统一 CLI 入口
   `wanning init / audit / ui / demo / anchor-verify` / 本地只读仪表盘 `wanning ui`(仅 127.0.0.1)
+- 装完即用三命令流:`wanning init --install` 直写宿主配置(merge 只动 wanning 条目,
+  写前备份,`--dry-run` 预览;codex 拒装给人工指引)+ `wanning doctor` 挂载面体检
+  (二进制/配置语义/真握手/账本目录可写/真实消费就绪度/版本一致性,每项 ❌ 带
+  修复命令;真握手用隔离临时账本)
 - 通道 adapter(京东/支付宝/微信/美团):mock 契约层备妥
 - 性能基准、审计回放 HTML、嵌入 SDK、CI 三步门禁(fmt/clippy/test)
 

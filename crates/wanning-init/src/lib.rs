@@ -2,7 +2,10 @@
 //!
 //! 产品边界(与 wanning-demo 演示台分开):本 crate 是**对端工具的接入生成器**——
 //! 零网络、零真实消费、零文件副作用(默认只打印 stdout;写文件必须显式 `--out`
-//! 且绝不覆盖已存在文件,动别人工具的配置 = 危险动作,拒)。
+//! 且绝不覆盖已存在文件,动别人工具的配置 = 危险动作,拒)。W-51a 起另有显式
+//! `--install` 直写面([`install`] 模块):写前读现物 → 只动 wanning 自己的条目 →
+//! 先备份 `<file>.wanning.bak` → 升级打 diff → `--dry-run` 零落盘;codex 拒装给
+//! 人工指引。
 //!
 //! **W-43a 产品化**:配置不再吐占位符——`wanning-mcp` 可执行文件与审计 WAL 路径在
 //! 生成时解析成**真实绝对路径**直写进配置(新用户拿到就能用,不必手改
@@ -56,6 +59,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde_json::json;
+
+pub mod install;
 
 /// 生成配置里写死的默认总预算(分)。保守默认,用户可在生成配置里改这个数。
 /// 与 `wanning-mcp::DEFAULT_CAP_CENTS` 同值——刻意不引依赖同步,改任一侧时两边
@@ -580,12 +585,21 @@ fn hermes(resolved: &Resolved) -> Artifact {
 const USAGE: &str = "wanning-init:给编码工具吐 Wanning MCP 配置(零网络、零真实消费)
 
 用法: wanning-init --platform <名> [--bin <wanning-mcp 路径>] [--wal <审计账本路径>] [--out <文件>]
+       wanning-init --platform <名> --install [--dry-run] [--yes] [--host-bin <路径>]
 
   --platform <名>  目标平台(必填):claude-code / codex / kimi / trae / workbuddy /
                    deepseek-harness / openclaw / hermes
   --bin <路径>     wanning-mcp 可执行文件;缺省从 PATH 解析(找不到 = 拒,给安装指引)
   --wal <路径>     审计 WAL 路径;缺省 = 产品默认 ~/.wanning/wal.jsonl(Windows %USERPROFILE%\\.wanning)
   --out <文件>     落盘路径;缺省只打印 stdout。已存在的文件**绝不覆盖**(动别人工具的配置 = 危险动作)
+  --install        直写安装:把配置写进宿主工具的正确位置(四 mcp.json 只 merge
+                   mcpServers.wanning、dsh 合并追加 cordis.patch.yml、openclaw/hermes
+                   执行宿主 CLI)。写前读现物 → 先备份 <file>.wanning.bak → 升级打
+                   diff;只动 wanning 自己的条目,他人条目语义不动
+  --dry-run        与 --install 同用:打印将做的全部动作,零落盘(连目录都不建)
+  --yes            与 --install 同用:openclaw/hermes 显式允许 wanning 代执行宿主 CLI
+                   (缺省只打印命令行)
+  --host-bin <路径> 宿主 CLI 可执行文件显式路径(缺省按 PATH 解析;找不到 = 拒)
   -h / --help      打印本说明后退出
 ";
 
@@ -617,6 +631,10 @@ fn cli_run(program: &str, args: &[String]) -> Result<(), CliError> {
     let mut mcp_bin: Option<PathBuf> = None;
     let mut wal: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
+    let mut install = false;
+    let mut dry_run = false;
+    let mut yes = false;
+    let mut host_bin: Option<PathBuf> = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -628,6 +646,10 @@ fn cli_run(program: &str, args: &[String]) -> Result<(), CliError> {
             "--bin" => mcp_bin = Some(next_path(args, &mut index, "--bin")?),
             "--wal" => wal = Some(next_path(args, &mut index, "--wal")?),
             "--out" => out = Some(next_path(args, &mut index, "--out")?),
+            "--install" => install = true,
+            "--dry-run" => dry_run = true,
+            "--yes" => yes = true,
+            "--host-bin" => host_bin = Some(next_path(args, &mut index, "--host-bin")?),
             other => {
                 return Err(CliError::Usage(format!(
                     "未知参数: {other}(用 --help 看用法)"
@@ -636,16 +658,44 @@ fn cli_run(program: &str, args: &[String]) -> Result<(), CliError> {
         }
         index += 1;
     }
-    let Some(platform) = platform else {
+    if install && out.is_some() {
+        return Err(CliError::Usage(
+            "--install 与 --out 冲突:--install 直写宿主配置的固定位置,--out 是生成到指定文件;\
+             二选一(用 --help 看用法)"
+                .to_string(),
+        ));
+    }
+    if !install && yes {
+        return Err(CliError::Usage(
+            "--yes 只在 --install 下有意义(openclaw/hermes 代执行宿主 CLI 的显式确认);\
+             单独给出 = 用法错"
+                .to_string(),
+        ));
+    }
+    if !install && dry_run {
+        return Err(CliError::Usage(
+            "--dry-run 只在 --install 下有意义(打印将做的安装动作,零落盘);单独给出 = 用法错"
+                .to_string(),
+        ));
+    }
+    if !install && host_bin.is_some() {
+        return Err(CliError::Usage(
+            "--host-bin 只在 --install 下有意义(宿主 CLI 解析);单独给出 = 用法错".to_string(),
+        ));
+    }
+    let Some(platform_input) = platform else {
         return Err(CliError::Usage(format!(
             "缺少 --platform <名>(支持矩阵:claude-code / codex / kimi / trae / workbuddy / \
              deepseek-harness / openclaw / hermes;--help 看用法;{program} 是 Wanning 的配置生成器)"
         )));
     };
-    let platform = parse_platform(&platform).map_err(|e| CliError::Usage(e.message()))?;
+    let platform = parse_platform(&platform_input).map_err(|e| CliError::Usage(e.message()))?;
 
     let resolved =
         resolve(&GenerateOptions { mcp_bin, wal }).map_err(|e| CliError::Failed(e.message()))?;
+    if install {
+        return cli_install(platform, &platform_input, &resolved, dry_run, yes, host_bin);
+    }
     let artifact = generate_with(platform, &resolved).map_err(|e| CliError::Failed(e.message()))?;
     println!("# Wanning 支付闸 — 配置生成完成");
     for note in &artifact.notes {
@@ -679,6 +729,81 @@ fn cli_run(program: &str, args: &[String]) -> Result<(), CliError> {
         }
         None => print!("{content}", content = artifact.content),
     }
+    Ok(())
+}
+
+/// `--install` 直写安装(CLI 面):进程环境在这里读(库层 [`install::install`] 只吃
+/// 显式 [`install::InstallEnv`],测试确定性),报告打成人可读的「安装报告」块。
+fn cli_install(
+    platform: Platform,
+    platform_input: &str,
+    resolved: &Resolved,
+    dry_run: bool,
+    yes: bool,
+    host_bin: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let cwd =
+        std::env::current_dir().map_err(|e| CliError::Failed(format!("解析当前目录失败: {e}")))?;
+    let dsh_home = std::env::var_os("DSH_HOME").map(PathBuf::from);
+    let openclaw_state_dir = std::env::var_os("OPENCLAW_STATE_DIR").map(PathBuf::from);
+    let hermes_home = std::env::var_os("HERMES_HOME").map(PathBuf::from);
+    let kimi_code_home = std::env::var_os("KIMI_CODE_HOME").map(PathBuf::from);
+    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let path_env = std::env::var_os("PATH");
+    let env = install::InstallEnv {
+        cwd: &cwd,
+        home: None,
+        dsh_home: dsh_home.as_deref(),
+        openclaw_state_dir: openclaw_state_dir.as_deref(),
+        hermes_home: hermes_home.as_deref(),
+        kimi_code_home: kimi_code_home.as_deref(),
+        codex_home: codex_home.as_deref(),
+        path_env: path_env.as_deref(),
+    };
+    let options = install::InstallOptions {
+        platform,
+        resolved,
+        env: &env,
+        dry_run,
+        yes,
+        host_bin: host_bin.as_deref(),
+    };
+    let report = install::install(&options).map_err(|e| CliError::Failed(e.message()))?;
+
+    // 头部与无 --install 的 stdout 同一形态(notes/first-run 引导照打),随后是安装报告。
+    let artifact = generate_with(platform, resolved).map_err(|e| CliError::Failed(e.message()))?;
+    println!("# Wanning 支付闸 — 配置生成完成");
+    for note in &artifact.notes {
+        println!("# {note}");
+    }
+    for note in first_run_notes() {
+        println!("# {note}");
+    }
+    println!();
+
+    println!("安装报告:");
+    println!("  状态:{}", report.state.label());
+    if let Some(target) = &report.target {
+        println!("  落点:{}", target.display());
+    }
+    if let Some(backup) = &report.backup {
+        println!("  备份:{}(写前原文件字节)", backup.display());
+    }
+    if !report.diff.is_empty() {
+        println!("  改动:");
+        for line in &report.diff {
+            println!("    {line}");
+        }
+    }
+    for action in &report.actions {
+        println!("  · {action}");
+    }
+    if let Some(printed) = &report.printed {
+        print!("{printed}");
+    }
+    println!(
+        "  下一步:wanning doctor --platform {platform_input} 验证挂载(真握手 + 账本可写 + 缺项清单)"
+    );
     Ok(())
 }
 

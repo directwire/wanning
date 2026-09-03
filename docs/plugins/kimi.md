@@ -9,6 +9,15 @@
 > home 成立;烧 kimi 额度的动作仍一律所有者亲自,凭证是否仍有效由真实会话证明)。
 > 本机实测基线:kimi-code **0.39.1**(`~/.kimi-code/bin/kimi.exe`)。
 
+## 一键直写与体检(W-51)
+
+- `wanning init --platform kimi --install`:把本页配置直写进项目根
+  `.kimi-code/mcp.json`——merge 只动 `mcpServers.wanning` 条目,他人条目不动,
+  写前备份 `<file>.wanning.bak`,升级打字段级 diff,`--dry-run` 零落盘预览。
+- `wanning doctor --platform kimi`:装完体检六项(二进制/配置语义/真握手/账本
+  目录可写/真实消费就绪度/版本一致性),每项 ❌ 带 ✗ 修复命令;真握手用隔离临时
+  账本,零模型零外网零真实消费。
+
 ## 安装(所有者已经装了)
 
 本机已有 kimi-code 0.39.1,无需任何安装动作。验证:
