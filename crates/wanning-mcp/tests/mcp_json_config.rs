@@ -1,4 +1,4 @@
-//! W-17 验收:仓库级 MCP 消费配置(`.mcp.json` / `.trae/mcp.json`)的**契约测试**。
+//! W-17 验收:仓库级 MCP 消费配置(docs/examples/ 下两份样例)的**契约测试**。
 //!
 //! 配置文件里写的命令与参数,必须能原样驱动真 server——配置烂了(工具名改了、
 //! 参数拼错、包名不对)这里当场红,而不是等所有者在 Claude Code 里踩坑。
@@ -89,7 +89,7 @@ fn assert_cargo_run_args(args: &[String], rel: &str) {
 
 #[test]
 fn claude_code_project_config_matches_server_contract() {
-    let config = read_config(".mcp.json");
+    let config = read_config("docs/examples/claude-code.mcp.json");
     let entry = &config["mcpServers"]["wanning"];
 
     // Claude Code:stdio 显式标注;command 走 PATH(cargo)。
@@ -122,7 +122,7 @@ fn claude_code_project_config_matches_server_contract() {
 
 #[test]
 fn trae_project_config_matches_server_contract() {
-    let config = read_config(".trae/mcp.json");
+    let config = read_config("docs/examples/trae.mcp.json");
     let entry = &config["mcpServers"]["wanning"];
 
     // Trae 文档的 stdio 字段表只有 command/args/env(无 type 字段,不写)。
@@ -145,7 +145,7 @@ fn trae_project_config_matches_server_contract() {
 fn configured_command_drives_the_real_server() {
     // 取 Claude Code 配置里 `--` 之后的服务端参数,把 --wal 换成临时 WAL,
     // spawn 真 bin:配置写的参数契约必须被真 server 接受并产出判定。
-    let config = read_config(".mcp.json");
+    let config = read_config("docs/examples/claude-code.mcp.json");
     let args = server_args(&config, ".mcp.json");
     let flags = server_flags(&args, ".mcp.json");
 
