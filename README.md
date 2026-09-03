@@ -45,9 +45,8 @@ Agent 建造者(Claude Code / Kimi / Trae / WorkBuddy / ANAI / 任何框架)
 cargo install wanning-cli        # 装 wanning 一个二进制,覆盖 init/audit/ui/demo/anchor-verify
 ```
 
-诚实状态:crates.io 上已有五 crate 的 0.1.0(所有者 2026-09-02 发布,早于统一 CLI
-入口),`wanning-cli` 的 0.1.1 待所有者按依赖序发布(发布 runbook 在档)后此路
-可用;在那之前 `cargo install wanning-cli` 会报找不到包——用路线 3。
+诚实状态:七个 crate 的 **0.1.1 已上 crates.io**(2026-09-03,含统一 CLI 入口
+`wanning-cli`;0.1.0 为 2026-09-02 五 crate 首发版)。
 
 **路线 2 · Release 下载(预编译二进制)**——不装 Rust 工具链:
 
@@ -57,9 +56,8 @@ cargo install wanning-cli        # 装 wanning 一个二进制,覆盖 init/audit
 # x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu / aarch64-apple-darwin(.github/workflows/release.yml)
 ```
 
-诚实状态:workflow 已备好但从未在本仓真跑;同形态 workflow 已在公开仓
-(`directwire/wanning`)为 v0.1.0 release 真跑绿过(三平台二进制 + SHA256SUMS,
-直核 2026-09-03);Release 路线随所有者 push tag 后即可用,首跑后以实际产物为准。
+诚实状态:v0.1.0 release 在本仓真跑绿过(三平台二进制 + SHA256SUMS);
+v0.1.1 tag push 后同 workflow 出新一版,以实际产物为准。
 
 **路线 3 · 源码构建(今天就能用)**:
 
