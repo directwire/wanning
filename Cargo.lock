@@ -832,7 +832,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wanning-bench"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "wanning-core",
  "wanning-demo",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "wanning-core",
@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-demo"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-init"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "wanning-core",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "wanning-core",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "wanning-sdk"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "wanning-core",
 ]
