@@ -10,24 +10,30 @@ use wanning_mcp::McpServer;
 
 const USAGE: &str = "wanning-mcp:Wanning 支付闸的 MCP server(stdio,零网络、零真实消费)
 
-用法: wanning-mcp --wal <路径> [--cap-cents <分>] [--hours <小时>]
+用法: wanning-mcp --wal <路径> [--budget <分>] [--max-spends <笔数>] [--hours <小时>]
 
-  --wal <路径>     审计 WAL 文件(append-only JSONL)。**必填**:没有审计的闸不服务(fail-closed)
-  --cap-cents <分> 演示委托的总预算,单位分,默认 1000(¥10.00)
-  --hours <小时>   演示委托的有效时长,默认 24(从启动时刻起)
-  -h / --help      打印本说明后退出
+  --wal <路径>      审计 WAL 文件(append-only JSONL)。**必填**:没有审计的闸不服务
+                    (fail-closed)。产品默认账本位置是 ~/.wanning/wal.jsonl;
+                    `wanning init` 生成配置时会把写实路径直接写进配置。
+  --budget <分>     演示委托的总预算,单位分,默认 1000(¥10.00)。产品主别名。
+  --cap-cents <分>  旧名,与 --budget 同义(两个同时给 = 拒,两义性 fail-closed)。
+  --max-spends <n>  速率护栏:滑动窗内至多 n 笔成功放行,默认 10;0 = 关掉护栏。
+  --hours <小时>    演示委托的有效时长,默认 24(从启动时刻起)。
+  -h / --help       打印本说明后退出
 ";
 
 struct Config {
     wal: String,
     cap_cents: u64,
     hours: u64,
+    max_spends: u32,
 }
 
 fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
     let mut wal: Option<String> = None;
-    let mut cap_cents = wanning_mcp::DEFAULT_CAP_CENTS;
+    let mut budget: Option<u64> = None;
     let mut hours = wanning_mcp::DEFAULT_HOURS;
+    let mut max_spends = wanning_mcp::DEFAULT_MAX_SPENDS_PER_DAY;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -35,11 +41,31 @@ fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
             "--wal" => {
                 wal = Some(next_value(args, &mut index, "--wal")?);
             }
-            "--cap-cents" => {
-                let raw = next_value(args, &mut index, "--cap-cents")?;
-                cap_cents = raw
+            // --budget 是产品主别名(W-43a),--cap-cents 是旧名(兼容一个发行周期)。
+            "--budget" | "--cap-cents" => {
+                let flag = args[index].as_str();
+                let raw = next_value(args, &mut index, flag)?;
+                let parsed: u64 = raw
                     .parse()
-                    .map_err(|_| format!("--cap-cents 必须是非负整数(分),收到: {raw}"))?;
+                    .map_err(|_| format!("{flag} 必须是非负整数(分),收到: {raw}"))?;
+                if parsed == 0 {
+                    return Err(format!(
+                        "{flag} 必须为正(0 分预算的委托一注册就没有可花额度,属配置错误)"
+                    ));
+                }
+                if budget.is_some() {
+                    return Err(
+                        "--budget 与 --cap-cents 是同义别名,同时出现即拒(两义性 fail-closed)"
+                            .to_string(),
+                    );
+                }
+                budget = Some(parsed);
+            }
+            "--max-spends" => {
+                let raw = next_value(args, &mut index, "--max-spends")?;
+                max_spends = raw
+                    .parse()
+                    .map_err(|_| format!("--max-spends 必须是非负整数(笔数),收到: {raw}"))?;
             }
             "--hours" => {
                 let raw = next_value(args, &mut index, "--hours")?;
@@ -63,8 +89,9 @@ fn parse_args(args: &[String]) -> Result<Option<Config>, String> {
     };
     Ok(Some(Config {
         wal,
-        cap_cents,
+        cap_cents: budget.unwrap_or(wanning_mcp::DEFAULT_CAP_CENTS),
         hours,
+        max_spends,
     }))
 }
 
@@ -89,7 +116,12 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut server = match McpServer::new_with(&config.wal, config.cap_cents, config.hours) {
+    let mut server = match McpServer::new_full(
+        &config.wal,
+        config.cap_cents,
+        config.hours,
+        config.max_spends,
+    ) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("wanning-mcp 启动失败(fail-closed): {e}");

@@ -16,6 +16,6 @@ name = "wanning-bench"
 path = "src/main.rs"
 
 [dependencies]
-wanning-core = { path = "../wanning-core", version = "0.1.0" }
+wanning-core.workspace = true
 # audit_html 导出基准要用 demo 库面的 build/render/export 管线(W-22)。
-wanning-demo = { path = "../wanning-demo", version = "0.1.0" }
+wanning-demo.workspace = true

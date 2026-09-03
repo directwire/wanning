@@ -1,4 +1,4 @@
-//! 老板侧审计锚点命令(W-23):`--anchor-sign` / `--anchor-verify` 的管线。
+//! 所有者侧审计锚点命令(W-23):`--anchor-sign` / `--anchor-verify` 的管线。
 //!
 //! 分工:核心([`wanning_core::anchor`])只管纯语义(材料/载荷/HMAC/比对),
 //! 这里管 IO——读密钥文件、读锚点文件、落盘锚点(**先写临时文件再原子改名**,
@@ -6,13 +6,13 @@
 //! 不碰已有输出)、签名前先对账(复用 [`crate::audit_html::build_report`]:
 //! 验完整性链 + 回放两遍,坏账绝不锚)。
 //!
-//! **密钥保管是人的程序**:签名密钥 = 老板的 32 字节(64 位十六进制)文件,
+//! **密钥保管是人的程序**:签名密钥 = 所有者的 32 字节(64 位十六进制)文件,
 //! 不在任何 Wanning 进程手里;`--anchor-sign` 没有它就是废铁(fail-closed),
 //! Debug/日志一律打码。锚点文件要**另行保管**(不同目录/上传/打印),与 WAL
 //! 分开——锚点若与 WAL 同放一处、都能被写进程改到,锚点就退化成自说自话。
 //!
 //! **验锚点也要密钥(HMAC 的诚实边界)**:核心提供的是对称锚点,验证方 = 持
-//! 密钥的老板;没有密钥的「只比内容不比 MAC」模式刻意不做——验不了真伪的
+//! 密钥的所有者;没有密钥的「只比内容不比 MAC」模式刻意不做——验不了真伪的
 //! 通过等于给伪造的「WAL+锚点」对开绿灯,审计工具宁可少一种用法。
 
 use std::path::Path;
@@ -58,7 +58,7 @@ impl AnchorKey {
 ///
 /// 对账先行([`build_report`]):完整性链断裂 / 回放对账不过的账,绝不签——
 /// 给一份坏账签锚点等于替坏账背书。空账(0 行)同样拒:锚住「什么都没有」
-/// 只会让老板误以为账已被锚,多半是 `--wal` 指错了文件。
+/// 只会让所有者误以为账已被锚,多半是 `--wal` 指错了文件。
 pub fn sign(
     wal_path: &Path,
     key: &AnchorKey,
@@ -85,7 +85,7 @@ pub fn sign(
     Ok(file)
 }
 
-/// 验锚点的产出(打印给老板看的对账结果)。
+/// 验锚点的产出(打印给所有者看的对账结果)。
 #[derive(Debug, PartialEq, Eq)]
 pub struct VerifyOutcome {
     /// 锚点声明的行数。
@@ -101,7 +101,7 @@ pub struct VerifyOutcome {
 
 /// 验锚点:锚点自身可信(MAC)→ WAL 完整性链 → 前缀逐字段比对。
 ///
-/// 顺序即 fail-closed 顺序:锚点本身对不上老板密钥,就不必读 WAL 了——
+/// 顺序即 fail-closed 顺序:锚点本身对不上所有者密钥,就不必读 WAL 了——
 /// 拿不可信的参照物对账,结论没有意义。
 pub fn verify(
     wal_path: &Path,
@@ -190,7 +190,7 @@ mod tests {
         state
             .register_delegation(Delegation::new(
                 "d1",
-                "老板",
+                "所有者",
                 "claude-code",
                 1_000,
                 1_700_000_000,
@@ -366,7 +366,7 @@ mod tests {
             "伪造锚点要点名 MAC 不符: {err}"
         );
 
-        // 换密钥验:老板之外的人验不过。
+        // 换密钥验:所有者之外的人验不过。
         let (_alt_path, alt_key) = key_file(KEY_HEX_ALT);
         let err = verify(&wal, &anchor_path, &alt_key).unwrap_err();
         assert!(matches!(err, CoreError::AnchorInvalid(_)), "{err}");
@@ -444,7 +444,7 @@ mod tests {
         let path = tmp_path("key-empty", "hex");
         std::fs::write(&path, "").expect("写");
         assert!(AnchorKey::from_hex_file(&path).is_err());
-        // 带换行/空白容忍(老板用编辑器存的,末尾换行是常态)。
+        // 带换行/空白容忍(所有者用编辑器存的,末尾换行是常态)。
         let (path, key) = key_file(KEY_HEX_32B);
         assert_eq!(
             AnchorKey::from_hex_file(&path).expect("重读"),

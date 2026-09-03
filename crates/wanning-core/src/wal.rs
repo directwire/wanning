@@ -27,7 +27,7 @@
 //!
 //! **已知边界**(诚实声明,不假装能测):链抓不住「只改最后一行内容」与「整体截尾」——
 //! 最后一行没有后继行引用它,截尾剩下的前缀自身是一条合法的链。要堵住需要**外部锚点**
-//! (老板侧签名的链尾 / 远端锚点),列为账户开通后的 TODO(见 master-plan)。
+//! (所有者侧签名的链尾 / 远端锚点),列为账户开通后的 TODO(见决策记录)。
 //!
 //! 回放([`read_verified`] + `crate::state::WanningState::replay`):逐行重放到一个空闸上,
 //! **重算结果必须与记录一致**,不一致即 fail-closed 报错;任何半行 JSON / 非法行 / 空行
@@ -179,10 +179,10 @@ pub fn single_writer_lock_path(wal_path: impl AsRef<Path>) -> PathBuf {
 /// 同时抢,恰好一个成功;内容 = 持锁进程 PID + WAL 路径,供拒启方报错指认。
 /// 锁随 [`Drop for WalLock`](Self) 释放(正常退出/panic 展开都会走到)。
 ///
-/// **已知权衡**(记录于 master-plan 决策记录):持锁进程被 kill -9 会留下孤儿锁,
+/// **已知权衡**(记录于决策记录):持锁进程被 kill -9 会留下孤儿锁,
 /// 下一个进程拒启,按错误信息确认无活进程后手动删除锁文件即可恢复(默认 WAL 在
 /// `target/` 下,`cargo clean` 亦可)。刻意不做「自动判死」:std 没有跨平台进程
-/// 存活检查,臆造判活逻辑比让老板手删一行文件危险得多——审计闸宁可拒启,不可
+/// 存活检查,臆造判活逻辑比让所有者手删一行文件危险得多——审计闸宁可拒启,不可
 /// 带病放行。
 ///
 /// **语义边界**:锁只挡写进程,不挡读者——回放/审计读取走只读打开,服务运行
@@ -249,11 +249,14 @@ impl Drop for WalLock {
 impl Wal {
     /// 打开(不存在则创建)用于追加。**禁 truncate**:已有内容一律保留。
     ///
-    /// 先拿单写者锁(fail-closed:第二个写进程拒启),再**整体验一遍已有历史**
-    /// ([`read_verified`]:逐行可解析 + 完整性链——历史被改/删/排,拒开不续写),
-    /// 再以追加模式打开。锁定之后验历史,才不会和另一个进程的追加赛跑。
+    /// 先自动创建父目录(W-43a 默认路径 `~/.wanning/wal.jsonl` 的「零配置」体验;
+    /// 显式路径同样受益),再拿单写者锁(fail-closed:第二个写进程拒启),再
+    /// **整体验一遍已有历史**([`read_verified`]:逐行可解析 + 完整性链——历史被
+    /// 改/删/排,拒开不续写),再以追加模式打开。锁定之后验历史,才不会和另一个
+    /// 进程的追加赛跑。
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let path = path.as_ref().to_path_buf();
+        crate::paths::ensure_wal_parent(&path)?;
         let _lock = WalLock::acquire(&path)?;
         // 文件不存在 = 全新日志(0 行、创世链 0);存在则历史必须完整体面。
         let (existing_lines, chain) = if path.exists() {
@@ -443,9 +446,20 @@ mod tests {
     use super::*;
 
     fn tmp_path(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join("wanning-wal-tests");
         std::fs::create_dir_all(&dir).expect("建临时目录");
-        dir.join(format!("{tag}-{}.jsonl", std::process::id()))
+        // pid + 原子序号 + 纳秒:裸 pid 跨轮运行会撞残留账本(W-21 教训,W-43b 轮补齐)。
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        dir.join(format!(
+            "{tag}-{}-{}-{nanos}.jsonl",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ))
     }
 
     fn sample_record(ts: u64) -> WalRecord {

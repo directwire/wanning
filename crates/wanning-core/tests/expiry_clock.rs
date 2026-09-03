@@ -19,6 +19,25 @@ use wanning_core::intent::SpendIntent;
 use wanning_core::state::WanningState;
 use wanning_core::wal::{WalDecision, WalRecord};
 
+/// 临时 WAL 名 = pid + 原子序号 + 纳秒:裸 pid 在跨轮运行时会撞上上一轮的
+/// 残留账本(`Wal::open` 追加式打开,旧记录全数出现在新账里)——W-21 撞名
+/// 教训的漏网 helper,2026-09-03 W-43b 轮实证复现后补齐。
+fn temp_wal(tag: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join("wanning-expiry-tests");
+    std::fs::create_dir_all(&dir).expect("建临时目录");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!(
+        "{tag}-{}-{}-{nanos}.jsonl",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ))
+}
+
 fn delegation() -> Delegation {
     // ¥10 预算,有效期 [1000, 2000) 秒。
     Delegation::new(
@@ -113,10 +132,7 @@ fn not_yet_valid_boundary_and_recovery_after_window_opens() {
 #[test]
 fn injected_clock_reaches_the_audit_trail() {
     // WAL 行里的 ts 必须等于注入时钟的值——否则审计时间线不可信。
-    let path = std::env::temp_dir()
-        .join("wanning-expiry-tests")
-        .join(format!("clock-to-wal-{}.jsonl", std::process::id()));
-    std::fs::create_dir_all(path.parent().unwrap()).expect("建临时目录");
+    let path = temp_wal("clock-to-wal");
 
     let clock = MockClock::new(1_500);
     let mut state = WanningState::with_wal(Arc::new(clock.clone()), &path).expect("开 WAL");
@@ -148,10 +164,7 @@ fn injected_clock_reaches_the_audit_trail() {
 #[test]
 fn live_state_uses_system_clock_without_sleep() {
     // 生产路径:系统时钟 + WAL。只验证时间戳来自系统时间,不做任何等待。
-    let path = std::env::temp_dir()
-        .join("wanning-expiry-tests")
-        .join(format!("live-{}.jsonl", std::process::id()));
-    std::fs::create_dir_all(path.parent().unwrap()).expect("建临时目录");
+    let path = temp_wal("live");
 
     let before = SystemClock.now();
     let mut state = WanningState::live(&path).expect("live 状态");

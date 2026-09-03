@@ -1,4 +1,4 @@
-//! W-29 验收:全链 mock 闭环场景(`--scenario full-loop-mock`,老板一条命令看全貌)。
+//! W-29 验收:全链 mock 闭环场景(`--scenario full-loop-mock`,所有者一条命令看全貌)。
 //!
 //! 场景链路:脚本意图 → 闸(含拒绝路径)→ 京东 mock backend(search→create_order)
 //! → 支付宝 mock channel(trigger_pay→回调幂等应用)→ 收据;**中途任一步拒绝即短路**

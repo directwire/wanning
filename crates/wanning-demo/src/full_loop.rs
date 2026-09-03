@@ -1,4 +1,4 @@
-//! 全链 mock 闭环场景(`--scenario full-loop-mock`):老板一条命令看全貌。
+//! 全链 mock 闭环场景(`--scenario full-loop-mock`):所有者一条命令看全貌。
 //!
 //! 链路 = 脚本意图 → 闸(含拒绝路径)→ 京东 mock backend(search→create_order)
 //! → 支付宝 mock channel(trigger_pay→回调幂等应用)→ 收据;**中途任一步拒绝即短路**
@@ -180,7 +180,7 @@ pub fn run_full_loop_mock() -> Result<FullLoopOutcome, CoreError> {
     let mut state = WanningState::with_wal(Arc::new(clock.clone()), &wal_path)?;
     state.register_delegation(Delegation::new(
         "d1",
-        "老板",
+        "所有者",
         "claude-code",
         1_000, // ¥10.00 总预算
         1_700_000_000,

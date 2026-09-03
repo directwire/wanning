@@ -97,7 +97,7 @@ pub fn run_smoke() -> Result<SmokeOutcome, CoreError> {
 
     let delegation = Delegation::new(
         "d1",
-        "老板",
+        "所有者",
         "claude-code",
         1_000, // ¥10.00
         1_700_000_000,
@@ -263,7 +263,7 @@ pub struct FourSellingPointsOutcome {
     pub chain_tail_replay: u64,
 }
 
-/// 场景 four-selling-points:预算内放行 → 超额拒 → 老板收权 → 撤销后拒 → 审计导出+回放对账。
+/// 场景 four-selling-points:预算内放行 → 超额拒 → 所有者收权 → 撤销后拒 → 审计导出+回放对账。
 pub fn run_four_selling_points() -> Result<FourSellingPointsOutcome, CoreError> {
     use crate::decision::{run_decision_loop, LoopConfig, ScriptedSource, StepEvent};
 
@@ -272,7 +272,7 @@ pub fn run_four_selling_points() -> Result<FourSellingPointsOutcome, CoreError> 
     let mut state = WanningState::with_wal(Arc::new(clock.clone()), &wal_path)?;
     state.register_delegation(Delegation::new(
         "d1",
-        "老板",
+        "所有者",
         "claude-code",
         1_000, // ¥10.00 总预算
         1_700_000_000,
@@ -384,7 +384,7 @@ fn print_four_selling_points(outcome: &FourSellingPointsOutcome) -> Result<(), C
     println!(
         "【卖点③ 撤销后拒绝(kill switch)】(证据:WAL 行 {revoke_line} 收权 / 行 {after_revoke_line} 拒绝)"
     );
-    println!("  老板 revoke 委托 d1;此后 agent 再请求 ¥1.00 也被拒(reason=revoked),");
+    println!("  所有者 revoke 委托 d1;此后 agent 再请求 ¥1.00 也被拒(reason=revoked),");
     println!("  撤销即时生效、单向不可解除,再小的金额也出不去。");
 
     println!();
@@ -419,7 +419,7 @@ fn print_four_selling_points(outcome: &FourSellingPointsOutcome) -> Result<(), C
     );
     println!(
         "  已知边界:只改最后一行内容、整体截尾,链抓不住——需外部锚点兜底(已落地 W-23: \
-         wanning-demo --anchor-sign,老板侧密钥签出锚点文件,验锚点时当场现形)"
+         wanning-demo --anchor-sign,所有者侧密钥签出锚点文件,验锚点时当场现形)"
     );
 
     println!();

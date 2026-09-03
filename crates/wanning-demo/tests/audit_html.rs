@@ -39,7 +39,7 @@ fn build_sample_wal(path: &Path) {
     state
         .register_delegation(Delegation::new(
             "d1",
-            "老板",
+            "所有者",
             "claude-code",
             1_000, // ¥10.00
             1_700_000_000,

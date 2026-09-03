@@ -5,8 +5,8 @@
 //! → 预算硬上限失效、同一 nonce 跨进程放行两次、审计行交错。
 //!
 //! 这不是假想场景:`.mcp.json` 与 `.trae/mcp.json` 指向**同一份**默认 WAL,
-//! 老板把 Claude Code 和 Trae 同时挂在仓库上,两个 MCP server 就是并发双闸。
-//! 见 master-plan 决策记录 2026-09-02(W-18)。
+//! 所有者把 Claude Code 和 Trae 同时挂在仓库上,两个 MCP server 就是并发双闸。
+//! 见决策记录 2026-09-02(W-18)。
 //!
 //! 语义边界:锁只挡**写进程**,不挡读者——回放/审计读取在服务运行期间必须可用。
 
@@ -20,9 +20,20 @@ use wanning_core::state::WanningState;
 use wanning_core::wal::{raw_lines, single_writer_lock_path};
 
 fn tmp_wal(tag: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join("wanning-single-writer-tests");
     std::fs::create_dir_all(&dir).expect("建临时目录");
-    dir.join(format!("{tag}-{}.jsonl", std::process::id()))
+    // pid + 原子序号 + 纳秒:裸 pid 跨轮运行会撞残留账本(W-21 教训,W-43b 轮补齐)。
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!(
+        "{tag}-{}-{}-{nanos}.jsonl",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ))
 }
 
 /// 续跑测试专用:委托窗口必须同时覆盖「回放世界」与「系统时钟的现在」。
@@ -30,7 +41,7 @@ fn long_lived_delegation() -> Delegation {
     let now = SystemClock.now();
     Delegation::new(
         "d1",
-        "老板",
+        "所有者",
         "agent",
         1000,
         now,

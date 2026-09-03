@@ -1,6 +1,6 @@
 # docs/examples · 对外样板包(W-33)
 
-> 老板/合作方 5 分钟找到任一接入路径的现成答案。所有样例全离线 + 本地 mock,
+> 所有者/合作方 5 分钟找到任一接入路径的现成答案。所有样例全离线 + 本地 mock,
 > 零真实消费(铁律 2)。
 
 ## 目录
@@ -9,7 +9,7 @@
 |---|---|---|
 | [multi-platform.md](multi-platform.md) | 想把闸挂上 agent 平台的人 | Claude Code(已实测)/ Trae / Kimi CLI 现成配置,WorkBuddy 查不到待人工 |
 | [sdk-embed.md](sdk-embed.md) | 想把闸嵌进自己 app 的人 | SDK 嵌入五步走查(权威代码在 doctest,本页不复制代码) |
-| [anchor-walkthrough.md](anchor-walkthrough.md) | 老板/审计方 | 锚点签验两条命令走查(v1 HMAC + v2 ed25519) |
+| [anchor-walkthrough.md](anchor-walkthrough.md) | 所有者/审计方 | 锚点签验两条命令走查(v1 HMAC + v2 ed25519) |
 | [audit-sample.html](audit-sample.html) | 合作方/审计方 | full-loop-mock 真实产出的审计回放页(4 行账:注册/放行/拒绝/放行),自包含零 JS 零外链,file:// 离线可开 |
 
 ## 对外样板清单(谈合作时的三件套)
@@ -27,7 +27,7 @@
 
 | 检查项 | 结果 |
 |---|---|
-| 真实姓名 | 无。owner=`老板`(占位代号),agent=`claude-code`(平台名,非个人) |
+| 真实姓名 | 无。owner=`所有者`(占位代号),agent=`claude-code`(平台名,非个人) |
 | 手机号/邮箱 | 无。页内长数字串逐条核对均为完整性链 19–20 位链值与 16 位链尾 hex 的片段(grep 上下文逐条确认),非电话号码 |
 | 真实商户/订单号 | 无。merchant=`jd:shop-1/2/3`(mock 占位);full-loop-mock 零出网,无真实订单 |
 | 金额 | mock 脚本固定值(500/900/200 分),非真实消费 |

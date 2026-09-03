@@ -49,7 +49,7 @@ fn state_with_delegation(tag: &str) -> WanningState {
     state
         .register_delegation(Delegation::new(
             "d1",
-            "老板",
+            "所有者",
             "claude-code",
             1_000,
             1_700_000_000,
@@ -128,7 +128,7 @@ fn scripted_four_selling_points_flow_through_the_loop() {
         }
         other => panic!("②应是 Spend: {other:?}"),
     }
-    // 老板收权(kill switch),WAL 行 4
+    // 所有者收权(kill switch),WAL 行 4
     match iter.next().expect("撤销") {
         StepEvent::BossRevoke {
             delegation_id,

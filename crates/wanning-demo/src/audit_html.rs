@@ -13,7 +13,7 @@
 //! - **数据全部 HTML 转义**:memo/merchant/owner 是自由文本,一个 `<script>` 都
 //!   不能直出([`escape_html`] + 测试实证)。
 //! - **诚实呈现**:已知边界落在页面上——链抓不住「只改最后一行内容」与「整体截尾」,
-//!   需外部锚点(老板侧锚点已落地:`--anchor-sign`,W-23);本页是只读视图,
+//!   需外部锚点(所有者侧锚点已落地:`--anchor-sign`,W-23);本页是只读视图,
 //!   证据以 WAL 原文为准。
 //!
 //! 渲染是纯函数(同一份账 + 同一时刻戳 → 字节级同一页面),时间戳由调用方注入,
@@ -493,7 +493,10 @@ fn category_or_dash(category: &str) -> &str {
 }
 
 /// HTML 转义:自由文本(memo/merchant/owner/路径)一律先过这里再进页面。
-fn escape_html(text: &str) -> String {
+///
+/// `pub`:W-43b 的 `wanning ui` 仪表盘复用同一个转义口径——自由文本进任何
+/// Wanning 页面都只有一种转义实现,不允许第二份各写各的。
+pub fn escape_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -509,13 +512,15 @@ fn escape_html(text: &str) -> String {
 }
 
 /// 金额:分 → 「¥整数.两位小数」。纯整数运算,**禁浮点**(这是钱)。
-fn format_cents(cents: u64) -> String {
+/// `pub`:供 `wanning ui` 仪表盘复用,金额呈现全仓一个口径。
+pub fn format_cents(cents: u64) -> String {
     format!("¥{}.{:02}", cents / 100, cents % 100)
 }
 
 /// Unix 秒 → 「YYYY-MM-DD HH:MM:SS」(UTC)。零依赖:民用日由 days-from-civil
-/// 的逆变换(Hinnant 算法)整数推导,含闰年。
-fn format_utc(ts: u64) -> String {
+/// 的逆变换(Hinnant 算法)整数推导,含闰年。`pub`:供 `wanning ui` 仪表盘复用,
+/// 时间呈现全仓一个口径。
+pub fn format_utc(ts: u64) -> String {
     let days = ts / 86_400;
     let secs_of_day = ts % 86_400;
     let (year, month, day) = civil_from_days(days as i64);
@@ -543,8 +548,9 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, u64, u64) {
     (year, month as u64, day as u64)
 }
 
-/// u64 → 16 位小写十六进制(链值/哈希的统一呈现)。
-fn chain_hex(value: u64) -> String {
+/// u64 → 16 位小写十六进制(链值/哈希的统一呈现)。`pub`:供 `wanning ui`
+/// 仪表盘复用,链值呈现全仓一个口径。
+pub fn chain_hex(value: u64) -> String {
     format!("{value:016x}")
 }
 

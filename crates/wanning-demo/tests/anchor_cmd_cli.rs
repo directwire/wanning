@@ -1,4 +1,4 @@
-//! W-23 验收:老板侧审计锚点(CLI 端到端,spawn 真实 bin)。
+//! W-23 验收:所有者侧审计锚点(CLI 端到端,spawn 真实 bin)。
 //!
 //! 主线证据链:签 → 验通过;然后两条 W-21 完整性链抓不住的篡改(整体截尾 /
 //! 只改尾行)在锚点下当场现形——这是本功能的立身之本。伪造锚点、错密钥、
@@ -35,7 +35,7 @@ fn build_sample_wal(path: &Path) {
     state
         .register_delegation(Delegation::new(
             "d1",
-            "老板",
+            "所有者",
             "claude-code",
             1_000,
             1_700_000_000,
@@ -88,7 +88,7 @@ fn tamper_memo(path: &Path, line: usize) {
     std::fs::write(path, lines.join("\n") + "\n").expect("重写 WAL");
 }
 
-/// 老板密钥(测试夹具;32 字节 = 64 位十六进制,文件带末尾换行——编辑器常态)。
+/// 所有者密钥(测试夹具;32 字节 = 64 位十六进制,文件带末尾换行——编辑器常态)。
 const KEY_HEX: &str = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
 
 fn write_key_file() -> PathBuf {
@@ -252,7 +252,7 @@ fn cli_verify_rejects_forged_anchor_and_foreign_key() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("MAC"), "要点名 MAC 不符: {stderr}");
 
-    // 换一把密钥验(不是老板签的)→ 拒。
+    // 换一把密钥验(不是所有者签的)→ 拒。
     let other_key = unique_path("key2", "hex");
     std::fs::write(
         &other_key,

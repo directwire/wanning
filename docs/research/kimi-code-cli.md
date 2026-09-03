@@ -3,14 +3,14 @@
 > 方法口径同 W-12/W-13/W-24/W-35:`[直核]` = 本会话直接抓取官方来源读到正文,或本机
 > 真实命令实测;`[摘要]` = 官方域名的检索/转述摘要。**查不到明确写查不到,零编造。**
 > 本调研 2026-09-02 完成,全程零网络消费路径、零真实下单、**零真实模型会话**(模型侧
-> 一律本地 mock,真实 kimi 会话烧的是老板 kimi 账号额度,红线 2 本来也禁)。
+> 一律本地 mock,真实 kimi 会话烧的是所有者 kimi 账号额度,红线 2 本来也禁)。
 
 ---
 
 ## 结论速读(≤20 行)
 
 1. **本机装的是 kimi-code 0.39.1**(Moonshot AI,`kimi --version` [直核]),与 W-17
-   调研的 kimi-cli 是**两代产品**:老板机器上有迁移痕迹(`~/.kimi/` 旧数据根 +
+   调研的 kimi-cli 是**两代产品**:所有者机器上有迁移痕迹(`~/.kimi/` 旧数据根 +
    `~/.kimi-code/tui.migrated-from-kimi-cli.toml`;CLI 自带 `kimi migrate` 子命令)。
 2. **现役挂法不是 `kimi mcp add`**:0.39.1 实测**无 `mcp` 子命令** [直核];官方文档
    直核挂法 = **`$KIMI_CODE_HOME/mcp.json`(用户级)或 `<repo>/.kimi-code/mcp.json`
@@ -23,7 +23,7 @@
 4. 与 W-35 codex 的差异:kimi-code **没有 `kimi mcp` 配置面子命令**,MCP 连接发生在
    会话启动时——本轮把模型侧换成**本地 mock LLM**(openai 协议指向 127.0.0.1),
    才把会话级 MCP 往返实测到真 kimi 二进制上;~~**真实模型会话仍待 kimi 账号登录**~~
-   **真实模型会话复证待老板放行烧额度**(RFC 8628 device-code 备用;W-42 修正
+   **真实模型会话复证待所有者放行烧额度**(RFC 8628 device-code 备用;W-42 修正
    2026-09-02:登录凭证 2026-08-30 已在档、早于本轮,见 §⑤ 阻塞清单)。
 5. 接入门槛清单:用户级 mcp.json **不经 workspace trust 提示**;项目级在未信任目录
    会弹 trust(默认拒绝信任)[直核文档]。工具命名 `mcp__wanning__*`,权限可用
@@ -34,7 +34,7 @@
 ## ① 两代 Kimi CLI:产品线与版本
 
 - **kimi-cli(legacy)**:GitHub `MoonshotAI/kimi-cli`(W-17 直核,README 自述
-  「evolving into Kimi Code CLI…本仓库将逐步收摊」)。老板机器数据根 `~/.kimi/`
+  「evolving into Kimi Code CLI…本仓库将逐步收摊」)。所有者机器数据根 `~/.kimi/`
   (config.toml 2026-06-15)。
 - **kimi-code(现役)**:官方文档站 <https://moonshotai.github.io/kimi-code/>(静态
   可抓,含 `llms-full.txt` 全量文档包)、GitHub `MoonshotAI/kimi-code`。本机实装
@@ -102,7 +102,7 @@ use /login to sign in, then retry; or set default_model in config.toml」(实测
 
 ## ③ 本机离线实测(0.39.1,零登录零真实模型)
 
-实测方法:**隔离 `KIMI_CODE_HOME`**(仓内 `target/w40/kimihome`),老板真实
+实测方法:**隔离 `KIMI_CODE_HOME`**(仓内 `target/w40/kimihome`),所有者真实
 `~/.kimi-code/config.toml` 全程未动(3151 字节前后一致,无 mcp.json)。**模型侧 =
 本地 mock LLM**(python,127.0.0.1:18777,openai 协议 SSE;零外网零消费)。取 Kent:
 
@@ -138,20 +138,20 @@ use /login to sign in, then retry; or set default_model in config.toml」(实测
 - **生成物实测**:`cargo run -p wanning-init -- --platform kimi` 输出填占位符 →
   写入隔离 mcp.json → 真 kimi 二进制往返 allow(WAL 2 行:注册 + allow 500 分)。
 
-## ⑤ 阻塞清单(待老板)
+## ⑤ 阻塞清单(待所有者)
 
 | 项 | 卡在哪 | 解锁后做什么 |
 |---|---|---|
-| 真实模型会话的 MCP 往返 | ~~kimi 账号登录~~ **登录凭证已在档**(W-42 直核:`~/.kimi-code/credentials/kimi-code.json` 2026-08-30 06:03 与 user-history 1,055,057 字节同刻在档,均早于本轮;当时「待登录」出自隔离空 home 的「No model configured … use /login」报错,只对隔离 home 成立)——卡点收窄为**老板放行烧 kimi 额度**(红线 2);凭证是否仍有效由真实会话证明,失效再走 device-code(mainland-cn/global 二选一) | 跑真模型会话复证本轮 mock 实测的三判定与工具注入 |
+| 真实模型会话的 MCP 往返 | ~~kimi 账号登录~~ **登录凭证已在档**(W-42 直核:`~/.kimi-code/credentials/kimi-code.json` 2026-08-30 06:03 与 user-history 1,055,057 字节同刻在档,均早于本轮;当时「待登录」出自隔离空 home 的「No model configured … use /login」报错,只对隔离 home 成立)——卡点收窄为**所有者放行烧 kimi 额度**(红线 2);凭证是否仍有效由真实会话证明,失效再走 device-code(mainland-cn/global 二选一) | 跑真模型会话复证本轮 mock 实测的三判定与工具注入 |
 | 项目级 mcp.json 的 trust 提示 | 交互 UI(headless 不可见;文档直核默认拒绝信任) | 在真实项目里信任一次,验证项目级挂法 |
-| `kimi upgrade` | 未测(升级可能写 C 盘 `~/.kimi-code/updates`,铁律 4 须老板拍板) | 版本升级后重测本轮契约 |
+| `kimi upgrade` | 未测(升级可能写 C 盘 `~/.kimi-code/updates`,铁律 4 须所有者拍板) | 版本升级后重测本轮契约 |
 
 ## 查不到清单
 
 - kimi-code **MCP 支持起点版本号**(哪个 0.x 首次含 MCP)——release notes 逐版
   考证未做,待人工;两代迁移的版本分界同样未考证。
 - 真实 kimi 模型会话下的 MCP 工具调用实测(§⑤ 第一条;W-42 修正:登录凭证
-  2026-08-30 已在档,卡点=老板放行烧额度,非登录)。
+  2026-08-30 已在档,卡点=所有者放行烧额度,非登录)。
 - 项目级 trust 提示的实际 UI 形态与白名单机制(文档只给行为描述)。
 - `provider catalog`(models.dev 导入)是否含免费/本地网关——未展开(与本任务无关,
   且涉真实模型调用)。
@@ -160,8 +160,7 @@ use /login to sign in, then retry; or set default_model in config.toml」(实测
 
 - [直核] 本机实测:`kimi --version` / `kimi --help` / `kimi mcp --help` / `kimi
   doctor`(真实 HOME 只读 + 隔离 HOME)/ `kimi -p` 三轮实验 / `kimi provider add
-  --help` / `kimi login --help` / `kimi acp --help`,0.39.1,2026-09-02(取证输出见
-  取证在档)
+  --help` / `kimi login --help` / `kimi acp --help`,0.39.1,2026-09-02(取证输出在档)
 - [直核] 官方 MCP 文档(挂法/字段/权限/trust):https://moonshotai.github.io/kimi-code/en/customization/mcp.html
 - [直核] 官方 Configuration 文档(config.toml 全 schema):https://moonshotai.github.io/kimi-code/llms-full.txt
   (config-files 节,2026-09-02 抓取)

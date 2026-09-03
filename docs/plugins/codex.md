@@ -2,10 +2,10 @@
 
 > W-35 落地。调研全文(来源/实测细节):`docs/research/codex-mcp.md`。
 > 状态:**配置面免登录已实测,钥匙即插;会话级使用待 OpenAI 登录**(烧 OpenAI
-> 额度的动作一律老板亲自)。
+> 额度的动作一律所有者亲自)。
 > 本机实测基线:codex-cli **0.133.0**(npm 全局);官方文档另有 0.152.1 可升级。
 
-## 安装(老板还没装的话)
+## 安装(所有者还没装的话)
 
 ```powershell
 npm install -g @openai/codex      # 本机已有 0.133.0,勿升级(全局升级写 C 盘,违反铁律)
@@ -62,7 +62,7 @@ startup_timeout_sec = 30          # cargo 冷编译超过默认 10s,放宽
 | `wanning_audit_tail` | 读审计尾 | 只读 |
 
 - **没有撤销工具、没有授权工具**(agent 能撤销就能复活,能授权就能自授权)——
-  授权/撤销走老板侧(见 `docs/examples/sdk-embed.md` 与白皮书 §4)。
+  授权/撤销走所有者侧(见 `docs/examples/sdk-embed.md` 与白皮书 §4)。
 - **同一 WAL 多平台并发**:`.mcp.json`(Claude Code)+ `.trae/mcp.json` + codex 的
   config.toml 若指向同一份 WAL,第二个写进程 fail-closed 拒启(W-18 单写者锁)——
   这是特性:两本账不会悄悄分叉。
@@ -72,7 +72,7 @@ startup_timeout_sec = 30          # cargo 冷编译超过默认 10s,放宽
 
 | 项 | 状态 |
 |---|---|
-| 会话内真调工具(端到端) | **待 OpenAI 登录**(且烧 OpenAI 额度,老板亲自) |
+| 会话内真调工具(端到端) | **待 OpenAI 登录**(且烧 OpenAI 额度,所有者亲自) |
 | `required: true` / `startup_timeout_sec` 行为 | 文档直核,待登录实测 |
 | project-scoped `.codex/config.toml` trust | 查不到细节,待实测 |
-| codex 升级 0.152.1 | 不做(npm 全局写 C 盘);新版本行为差异待老板拍板后重测 |
+| codex 升级 0.152.1 | 不做(npm 全局写 C 盘);新版本行为差异待所有者拍板后重测 |

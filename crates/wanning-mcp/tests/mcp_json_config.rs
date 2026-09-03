@@ -1,12 +1,12 @@
 //! W-17 验收:仓库级 MCP 消费配置(`.mcp.json` / `.trae/mcp.json`)的**契约测试**。
 //!
 //! 配置文件里写的命令与参数,必须能原样驱动真 server——配置烂了(工具名改了、
-//! 参数拼错、包名不对)这里当场红,而不是等老板在 Claude Code 里踩坑。
+//! 参数拼错、包名不对)这里当场红,而不是等所有者在 Claude Code 里踩坑。
 //!
 //! `cargo run` 这条命令本身不在测试里 spawn:`cargo test` 持有 build 锁,子 cargo
 //! 会死等锁。做法:解析配置 → 取其 `--` 之后的服务端参数 → 仅把 `--wal` 的取值换成
 //! 本测试的临时 WAL(hermetic,可重复跑)→ 用 `CARGO_BIN_EXE_wanning-mcp` spawn 真
-//! bin 走完整握手。`cargo run` 端到端实录见 docs/tasks/P0-demo-closedloop.md 实测记录。
+//! bin 走完整握手。`cargo run` 端到端实录实测记录在档。
 //!
 //! 各平台配置文件与字段依据(2026-09-02 直核,详见 docs/research/mcp-consumption.md):
 //! - Claude Code:项目根 `.mcp.json`,字段 `type/command/args/env`;路径用

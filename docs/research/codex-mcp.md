@@ -18,7 +18,7 @@
    `codex doctor` 实证「no Codex credentials were found」→ **待 OpenAI 账号**(且
    会话烧 OpenAI 额度,红线 2 本来也禁)。
 4. **Wanning 侧结论:codex 是「钥匙即插」状态**——配置面免登录已实测,配置生成的
-   TOML 已实证可直接启动 wanning-mcp 并落账;唯一缺口 = 老板的 OpenAI 登录。
+   TOML 已实证可直接启动 wanning-mcp 并落账;唯一缺口 = 所有者的 OpenAI 登录。
 5. 对 W-36 生成器的直接影响:codex **没有 `.mcp.json` 式的仓根文件**(project-scoped
    `.codex/config.toml` 存在但 trust 机制待实测,`codex mcp add` 实测只写全局
    home),生成器应输出 **config.toml 片段 / `codex mcp add` 命令行**。
@@ -72,7 +72,7 @@ args = ["--wal", 'D:\...\demo.wal']
 **与 Wanning 语义的契合点**:`required = true` 与闸的 fail-closed 同构——server 起
 不来就拒绝启动会话,不静默降级为「无闸裸奔」(文档字段,待 OpenAI 登录后实测)。
 `disabled_tools` 可把审计读面关掉,但**工具面本就只有两个**(闸评估+审计读),无
-需过滤;**撤销/锚点等老板侧动作在 MCP 面不存在**(W-15/W-17 既定设计),不靠
+需过滤;**撤销/锚点等所有者侧动作在 MCP 面不存在**(W-15/W-17 既定设计),不靠
 codex 的过滤兜底。
 
 **CLI 命令面** [直核:0.133.0 `codex mcp --help` / `codex mcp add --help`]:
@@ -86,7 +86,7 @@ codex 的过滤兜底。
 
 ## ③ 本机离线实测(0.133.0,零登录零消费)
 
-实测方法:**隔离 `CODEX_HOME`**(指到仓内 `target\w35-codex-home`),老板真实
+实测方法:**隔离 `CODEX_HOME`**(指到仓内 `target\w35-codex-home`),所有者真实
 `~/.codex/config.toml` 全程未动(前后 2526 字节一致)。`CODEX_HOME` 隔离被 codex
 官方支持:`codex doctor` 直接打印生效的 `CODEX_HOME` 路径;config-reference 亦引用
 `$CODEX_HOME` 约定。[直核]
@@ -107,21 +107,21 @@ codex 的过滤兜底。
    budget_after;退出码 0;WAL 落盘 3 行,`seq/prev/rec` 完整性链齐全。→ **codex
    写出的配置命令,不加任何修改即可启动闸并真实落账**。
 6. doctor 报 0.152.1 可升级,**不升**:npm 全局升级会写入 C 盘
-   (`C:.Users.<用户名>.AppData.Roaming.npm`),违反铁律 4。
+   (`C:\Users\<用户名>\AppData\Roaming\npm`),违反铁律 4。
 
-## ④ 阻塞清单(待老板/待登录)
+## ④ 阻塞清单(待所有者/待登录)
 
 | 项 | 卡在哪 | 解锁后做什么 |
 |---|---|---|
-| 会话级 MCP 工具注入 | OpenAI 登录(doctor ✗ auth);且会话烧 OpenAI 额度(红线 2,须老板亲自) | 实测 codex 会话内真调 wanning_gate_evaluate;验证 `required: true`、`startup_timeout_sec` 行为 |
+| 会话级 MCP 工具注入 | OpenAI 登录(doctor ✗ auth);且会话烧 OpenAI 额度(红线 2,须所有者亲自) | 实测 codex 会话内真调 wanning_gate_evaluate;验证 `required: true`、`startup_timeout_sec` 行为 |
 | project-scoped `.codex/config.toml` | trust 机制文档提了但没给操作,查不到细节 | 实测仓内 `.codex/config.toml` 是否被采纳(trusted projects) |
 | MCP 起点对应版本号 | releases 逐版考证未做(403 限流) | 人工翻 releases 页补一句 |
 
 ## 来源
 
 - [直核] 本机实测:`codex --version` / `codex mcp --help` / `codex mcp add --help` /
-  `codex mcp list` / `codex mcp get` / `codex doctor`,0.133.0,2026-09-02(取证输出
-  取证在档)
+  `codex mcp list` / `codex mcp get` / `codex doctor`,0.133.0,2026-09-02
+  (取证输出在档)
 - [直核] Codex 官方 MCP 文档(CLI 面):https://learn.chatgpt.com/docs/extend/mcp?surface=cli
   (由 https://developers.openai.com/codex/mcp 308 重定向)
 - [直核] Codex 配置参考(mcp_servers 全字段):https://learn.chatgpt.com/docs/config-file/config-reference

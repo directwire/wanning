@@ -7,13 +7,19 @@ members = [
     "crates/wanning-sdk",
     "crates/wanning-bench",
     "crates/wanning-init",
+    "crates/wanning-cli",
 ]
 
 [workspace.package]
-version = "0.1.0"
+# 0.1.0 已由所有者(changshenhan)2026-09-02 发布上 crates.io(五 crate;早于 W-43a 的
+# paths/默认预算/统一 CLI)。已发布版本不可重发 → 本仓版本整体升 0.1.1,所有者按
+# 依赖序(core → sdk/mcp/init → demo → cli)发布即带全 W-43a/W-43b/W-43c 内容。
+version = "0.1.1"
 edition = "2021"
 authors = ["changshenhan"]
-license = "Apache-2.0"
+# 双许可 = Rust 生态默认(W-43c 发布就绪;真发布动作=所有者)。
+license = "MIT OR Apache-2.0"
+# 仓库地址取自 crates.io 官方记录(所有者 2026-09-02 发布 0.1.0 时自己填的;非分身臆造)。
 repository = "https://github.com/directwire/wanning"
 
 [workspace.dependencies]
@@ -23,6 +29,13 @@ serde_json = "1"
 # 今晚(P0 离线阶段)所有测试打本地 mock server;真实端点必须先过 wanning-demo 的
 # fail-closed 护栏(WANNING_ALLOW_REAL_SPEND + 密钥齐全)。
 ureq = "2"
+# 仓内依赖集中在此:path 本地解析,发布时按 version 走 crates.io——版本只此一处,
+# 升级改这一行(W-43c;publish 验证要求 path 依赖必须带 version)。
+wanning-core = { path = "crates/wanning-core", version = "0.1.1" }
+wanning-sdk = { path = "crates/wanning-sdk", version = "0.1.1" }
+wanning-mcp = { path = "crates/wanning-mcp", version = "0.1.1" }
+wanning-init = { path = "crates/wanning-init", version = "0.1.1" }
+wanning-demo = { path = "crates/wanning-demo", version = "0.1.1" }
 
 [profile.release]
 lto = "thin"

@@ -89,7 +89,7 @@ pub struct LoopConfig {
     pub delegation_id: String,
     /// 最多几笔意图(防失控;决策源提前 Exhausted 就自然结束)。
     pub max_steps: usize,
-    /// 第 N 笔意图判定完成后执行 kill switch(老板收权演示)。None = 不撤销。
+    /// 第 N 笔意图判定完成后执行 kill switch(所有者收权演示)。None = 不撤销。
     pub revoke_after_n_intents: Option<usize>,
 }
 
@@ -102,7 +102,7 @@ pub enum StepEvent {
         /// 该判定落审计的 WAL 行号(1-based)。
         wal_line: u64,
     },
-    /// 老板收权(kill switch)——撤销是授权者的动作,agent 无权发起。
+    /// 所有者收权(kill switch)——撤销是授权者的动作,agent 无权发起。
     BossRevoke {
         delegation_id: String,
         wal_line: u64,
@@ -249,7 +249,7 @@ fn spend_count(events: &[StepEvent]) -> usize {
 // 实现一:ScriptedSource(离线脚本场景)
 // ---------------------------------------------------------------------------
 
-/// 内置确定性离线脚本:下单 → 超额 → (老板收权) → 撤销后下单。
+/// 内置确定性离线脚本:下单 → 超额 → (所有者收权) → 撤销后下单。
 /// 输出必须标注「离线脚本场景」——这不是模型在决策,是排好的戏。
 #[derive(Debug)]
 pub struct ScriptedSource {

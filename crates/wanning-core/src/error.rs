@@ -35,8 +35,8 @@ pub enum CoreError {
     WalChainBroken { line: u64, message: String },
     /// 回放时重算结果与记录不一致(日志被改 / 实时与回放口径漂移)。fail-closed 停机。
     WalMismatch { line: u64, message: String },
-    /// 审计锚点文件非法:格式/字段读不懂,或 MAC 与老板密钥对不上(锚点不是
-    /// 老板签的,或锚点本身被改)。fail-closed:不可信的锚点比没有锚点更危险。
+    /// 审计锚点文件非法:格式/字段读不懂,或 MAC 与所有者密钥对不上(锚点不是
+    /// 所有者签的,或锚点本身被改)。fail-closed:不可信的锚点比没有锚点更危险。
     AnchorInvalid(String),
     /// 当前 WAL 与合法锚点不符:整体截尾(行数不足)或被锚定的前缀内容被改。
     /// 这是 W-21 完整性链已知边界(尾行篡改/截尾本地验不住)的抓法。
@@ -81,7 +81,7 @@ impl fmt::Display for CoreError {
                 write!(f, "审计锚点文件不可信(fail-closed): {m}")
             }
             CoreError::AnchorMismatch(m) => {
-                write!(f, "审计日志与老板锚点不符——审计被动过(fail-closed): {m}")
+                write!(f, "审计日志与所有者锚点不符——审计被动过(fail-closed): {m}")
             }
         }
     }

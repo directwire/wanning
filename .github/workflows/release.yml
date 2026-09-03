@@ -1,77 +1,103 @@
+# W-43c 发布件:tag → 三平台预编译二进制 + SHA256 清单。
+#
+# 诚实边界(W-43c/W-46 取证):本 workflow 只做了 YAML 语法校验(python yaml.safe_load)
+# 与逐行人工核对,**从未真跑**——真跑需要仓库有 remote 且 tag 已 push(所有者钥匙)。
+# 同形态的 workflow 在公开仓(directwire/wanning)已为
+# v0.1.0 release 真跑绿过(三平台二进制 + SHA256SUMS,W-46 直核),产物语义经实证。
+# 语法之外的假设如实列出:
+#   - actions/checkout@v4 / actions/upload-artifact@v4 是当时(2026-09)的主流大版本;
+#   - dtolnay/rust-toolchain 钉死 @1.96.0(W-46 回带公开仓的决策:可复现门禁,与本地
+#     门禁同版本;最新稳定版曾在 CI 踩新 lint,公开仓实锤后回带);
+#   - 三平台矩阵取自任务书 §B.6:x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu /
+#     aarch64-apple-darwin;
+#   - 产物含 wanning 与 wanning-mcp 两个二进制(W-46 修正:wanning init 生成器产出的
+#     配置 spawn 的是 wanning-mcp,Release 只发 wanning 会把非 Rust 用户堵死在
+#     fail-closed 的 PATH 解析上——与北极星相悖;W-43c 旧版只发 wanning)。
+#   - 收尾用 `gh release create`(创建 release 并上传)——W-46 修正:旧版
+#     `gh release upload` 要求 release 已存在,而 tag push 只建 git tag 不建
+#     release 对象,首跑必挂;公开仓 v0.1.0 用的 softprops/action-gh-release
+#     走的就是「create+attach」语义,此处用 gh CLI 一等公民等价实现。
+# 首次真跑后如发现 action 版本/环境差异,以真跑输出为准修本文件。
+
 name: release
 
-# Tag push (v*) → build three-platform release binaries + SHA256SUMS.
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
   build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos-latest
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            exe: wanning.exe
+            mcp_exe: wanning-mcp.exe
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            exe: wanning
+            mcp_exe: wanning-mcp
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            exe: wanning
+            mcp_exe: wanning-mcp
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Install Rust toolchain
+        # 钉死 1.96.0:可复现发布件(与本地门禁/公开仓同版本,W-46 回带)。
+        uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - name: build
-        run: cargo build --release --target ${{ matrix.target }} -p wanning-demo -p wanning-init -p wanning-mcp
-      - name: package (unix)
-        if: runner.os != 'Windows'
+
+      # 闸是纯 std 实现零新增依赖,build 缓存收益有限;保持 workflow 最小面。
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }} -p wanning-cli -p wanning-mcp
+
+      - name: Stage artifact
         shell: bash
         run: |
-          dir="wanning-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$dir"
-          for bin in wanning-demo wanning-init wanning-mcp wanning-anchor-verify; do
-            f="target/${{ matrix.target }}/release/$bin"
-            [ -f "$f" ] && cp "$f" "$dir/"
-          done
-          tar czf "$dir.tar.gz" "$dir"
-          sha256sum "$dir.tar.gz" >> SHA256SUMS.txt
-      - name: package (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $dir = "wanning-${{ github.ref_name }}-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force $dir | Out-Null
-          foreach ($bin in @("wanning-demo","wanning-init","wanning-mcp","wanning-anchor-verify")) {
-            $f = "target/${{ matrix.target }}/release/$bin.exe"
-            if (Test-Path $f) { Copy-Item $f $dir }
-          }
-          tar czf "$dir.tar.gz" $dir
-          $h = (Get-FileHash "$dir.tar.gz" -Algorithm SHA256).Hash.ToLower()
-          "$h  $dir.tar.gz" | Out-File -Append -Encoding ascii SHA256SUMS.txt
-      - name: upload artifacts
+          dir="wanning-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "${dir}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "${dir}/"
+          cp "target/${{ matrix.target }}/release/${{ matrix.mcp_exe }}" "${dir}/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "${dir}/"
+          if command -v sha256sum > /dev/null; then
+            ( cd "${dir}" && sha256sum "${{ matrix.exe }}" "${{ matrix.mcp_exe }}" > SHA256SUMS.txt )
+          else
+            # macOS 自带 shasum(sha256sum 在 macos runner 上不保证在)。
+            ( cd "${dir}" && shasum -a 256 "${{ matrix.exe }}" "${{ matrix.mcp_exe }}" > SHA256SUMS.txt )
+          fi
+          tar -czf "${dir}.tar.gz" "${dir}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bins-${{ matrix.target }}
-          path: |
-            *.tar.gz
-            SHA256SUMS.txt
+          name: wanning-${{ matrix.target }}
+          path: wanning-*.tar.gz
 
   release:
+    name: attach to GitHub release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - name: publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            *.tar.gz
-            SHA256SUMS.txt
+
+      # 软件无网络消费面(闸本体零外联),发布动作本身只是文件上传;真跑等 remote。
+      - name: Create the tag release and attach archives
+        run: |
+          gh release create "${GITHUB_REF_NAME}" wanning-*.tar.gz \
+            --title "wanning ${GITHUB_REF_NAME}" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

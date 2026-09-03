@@ -13,7 +13,7 @@
 //! **边界(P1 骨架,刻意最小)**:只暴露「闸评估」与「审计读取」两个工具——
 //! 零网络、零渠道调用、零真实消费。真实支付永远不该出现在这个工具面上:
 //! 闸的职责是判定与审计,消费动作由渠道 adapter(wanning-demo)在闸放行之后另行执行。
-//! 撤销(kill switch)**不设工具**:那是老板侧动作,agent 无权撤销自己的授权
+//! 撤销(kill switch)**不设工具**:那是所有者侧动作,agent 无权撤销自己的授权
 //! (语义对齐 wanning-demo 决策回路的 `BossRevoke`)。
 //!
 //! **审计不可缺席(fail-closed)**:启动必须给 `--wal`;没有审计日志的闸不服务任何请求。
@@ -26,6 +26,7 @@ use wanning_core::clock::{Clock, SystemClock};
 use wanning_core::delegation::Delegation;
 use wanning_core::gate::GateDecision;
 use wanning_core::intent::SpendIntent;
+use wanning_core::policy::{SpendPolicy, VelocityLimit};
 use wanning_core::state::WanningState;
 
 /// 本 server 支持且仅支持的 MCP 协议版本(spec 2025-06-18)。
@@ -36,10 +37,18 @@ pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TOOL_EVALUATE: &str = "wanning_gate_evaluate";
 pub const TOOL_AUDIT_TAIL: &str = "wanning_audit_tail";
 
-/// 启动时注册的演示委托 id(老板 → agent 的一次真实授权,进 WAL)。
+/// 启动时注册的演示委托 id(所有者 → agent 的一次真实授权,进 WAL)。
 pub const DEFAULT_DELEGATION_ID: &str = "demo-d1";
 pub const DEFAULT_CAP_CENTS: u64 = 1_000; // ¥10.00(与 demo 总预算一致)
 pub const DEFAULT_HOURS: u64 = 24;
+
+/// W-43a 产品默认的速率护栏:一个滑动窗(`DEFAULT_VELOCITY_WINDOW_SECS`)内至多
+/// 这么多笔**成功放行**。保守默认,`--max-spends` 可覆盖(0 = 关掉速率护栏)。
+/// 只有成功放行计入,拒绝不占槽(W-27 语义);策略随注册委托落审计(不是内存
+/// 软约定),续启同一 WAL 时以 WAL 里的原注册为准。
+pub const DEFAULT_MAX_SPENDS_PER_DAY: u32 = 10;
+/// 产品默认速率窗口:86 400 秒 = 一天(滑动窗,非自然日)。
+pub const DEFAULT_VELOCITY_WINDOW_SECS: u64 = 86_400;
 
 // JSON-RPC 2.0 / MCP 错误码。
 const CODE_PARSE_ERROR: i64 = -32700;
@@ -54,12 +63,32 @@ pub struct McpServer {
 }
 
 impl McpServer {
-    /// 默认参数启动(演示委托:上限 ¥10,有效期 24h,从现在起)。
+    /// 默认参数启动(演示委托:上限 ¥10、有效期 24h、产品默认速率护栏)。
     pub fn new(wal_path: impl AsRef<Path>) -> Result<Self, wanning_core::error::CoreError> {
-        Self::new_with(wal_path, DEFAULT_CAP_CENTS, DEFAULT_HOURS)
+        Self::new_full(
+            wal_path,
+            DEFAULT_CAP_CENTS,
+            DEFAULT_HOURS,
+            DEFAULT_MAX_SPENDS_PER_DAY,
+        )
     }
 
-    /// 启动并注册演示委托。**必须挂 WAL**(fail-closed:没有审计的闸不服务)。
+    /// 启动并注册演示委托(总预算/有效期可配;速率护栏用产品默认)。
+    pub fn new_with(
+        wal_path: impl AsRef<Path>,
+        cap_cents: u64,
+        hours: u64,
+    ) -> Result<Self, wanning_core::error::CoreError> {
+        Self::new_full(wal_path, cap_cents, hours, DEFAULT_MAX_SPENDS_PER_DAY)
+    }
+
+    /// 启动并注册演示委托,四个产品旋钮全可配(W-43a)。
+    ///
+    /// `max_spends_per_day` = 速率护栏(W-27 velocity 语义):滑动窗
+    /// `DEFAULT_VELOCITY_WINDOW_SECS` 内至多这么多笔**成功放行**;`0` = 显式关掉
+    /// 速率护栏(委托不带 velocity 策略,与 W-27 之前的注册行逐字节一致)。
+    ///
+    /// **必须挂 WAL**(fail-closed:没有审计的闸不服务)。
     ///
     /// 启动**可重入**:agent 平台重启会话、重连同一 `--wal` 是常态,二次启动必须
     /// ① 先整体回放旧 WAL 对账后**接续旧账**(`WanningState::live_resuming`——账本、
@@ -68,25 +97,35 @@ impl McpServer {
     /// 重新注册等于把 kill switch 杀掉的授权复活(语义对齐 wanning-demo 决策回路的
     /// `BossRevoke`,撤销单向)。已撤销/已过期的演示委托继续被闸拒绝,
     /// 想重新演示请换一个新 WAL 路径。
-    pub fn new_with(
+    pub fn new_full(
         wal_path: impl AsRef<Path>,
         cap_cents: u64,
         hours: u64,
+        max_spends_per_day: u32,
     ) -> Result<Self, wanning_core::error::CoreError> {
         let mut state = WanningState::live_resuming(wal_path)?;
         let now = SystemClock.now();
         let valid_until = now
             .checked_add(hours.saturating_mul(3600))
             .expect("有效期溢出:hours 配置过大");
-        let delegation = Delegation::new(
+        let mut delegation = Delegation::new(
             DEFAULT_DELEGATION_ID,
-            "老板",
+            "所有者",
             "mcp-client",
             cap_cents,
             now,
             valid_until,
             "agent:mcp-client",
         );
+        if max_spends_per_day > 0 {
+            delegation = delegation.with_policy(SpendPolicy {
+                velocity: Some(VelocityLimit {
+                    max_spends: max_spends_per_day,
+                    window_secs: DEFAULT_VELOCITY_WINDOW_SECS,
+                }),
+                ..SpendPolicy::default()
+            });
+        }
         match state.register_delegation(delegation) {
             Ok(()) => {}
             // 已注册:沿用 WAL 里的原注册,不写任何新审计行。

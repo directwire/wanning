@@ -293,9 +293,20 @@ mod tests {
     use crate::gate::DenyReason;
 
     fn tmp_wal(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join("wanning-state-tests");
         std::fs::create_dir_all(&dir).expect("建临时目录");
-        dir.join(format!("{tag}-{}.jsonl", std::process::id()))
+        // pid + 原子序号 + 纳秒:裸 pid 跨轮运行会撞残留账本(W-21 教训,W-43b 轮补齐)。
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        dir.join(format!(
+            "{tag}-{}-{}-{nanos}.jsonl",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ))
     }
 
     fn delegation() -> Delegation {
@@ -371,7 +382,12 @@ mod tests {
         // 构造:占用目标路径为目录,使 WAL 打开即失败。
         let dir = std::env::temp_dir().join("wanning-state-tests");
         std::fs::create_dir_all(&dir).expect("建临时目录");
-        let path = dir.join(format!("dir-as-wal-{}.jsonl", std::process::id()));
+        // 路径名同理带纳秒:上一轮残留的同名目录会让本轮占位失败。
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = dir.join(format!("dir-as-wal-{nanos}.jsonl"));
         std::fs::create_dir_all(&path).expect("占位为目录");
 
         let err = WanningState::with_wal(Arc::new(MockClock::new(1500)), &path).unwrap_err();

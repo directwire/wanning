@@ -1,6 +1,6 @@
 //! # Wanning 嵌入 SDK(wanning-sdk)
 //!
-//! 平台把 Wanning 闸**嵌进自己进程**的门面(master-plan P2「SDK」)。MCP
+//! 平台把 Wanning 闸**嵌进自己进程**的门面(P2「SDK」)。MCP
 //! server(`wanning-mcp`)是给 agent 平台挂的 **stdio 面**;本 crate 是给宿主
 //! 程序(如 ANAI 的执行层)直接调用的**进程内面**——同一个闸,两种接法。
 //!
@@ -76,7 +76,7 @@
 //!   写进程/写句柄在 [`Wanning::open`] 就 fail-closed(`CoreError::WalLocked`,
 //!   单写者锁,见 `wanning-core` W-18)。
 //! - **撤销/锚点/审计页导出不在这个面**——撤销是授权者动作(agent 无权,
-//!   MCP 面同样不设);锚点是老板侧 CLI(`wanning-demo --anchor-sign`);
+//!   MCP 面同样不设);锚点是所有者侧 CLI(`wanning-demo --anchor-sign`);
 //!   给人看的回放页是 `--export-audit`。SDK 只提供 [`Wanning::audit_tail`] 与
 //!   [`Wanning::self_check`] 供宿主自查。
 //!

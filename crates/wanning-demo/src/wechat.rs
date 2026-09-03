@@ -4,7 +4,7 @@
 //! **今晚不碰真端点**:所有测试打本地 mock(tests/common 的 TcpListener);
 //! 真端点调用必须先过 W-07 护栏([`crate::guard`])。
 //!
-//! 报文口径(零编造,两级标注,全文见 `docs/research/wechat-daikou.md` W-24 调研):
+//! 报文口径(零编造,两级标注,全文见 W-24 调研(在档)):
 //! - **[直核] 可落代码的**:受理扣款接口 = `POST /v3/papay/pay/transactions/apply`,
 //!   必填 `appid` / `out_trade_no` / `description` / `transaction_notify_url` /
 //!   `contract_id` / `amount{total(分,整数), currency(仅 CNY)}`;系统受理后
@@ -34,11 +34,11 @@
 //! 3. 错误码语义映射(以官方受理扣款文档为准,不挪用预约扣费清单)
 //! 4. `out_trade_no` 的长度/字符约束(调研未直核;当前复用共用幂等键派生)
 //! 5. 渠道侧**解约**接口(对应 kill switch 的渠道半边;调研仅 [摘要] 级)——
-//!    是否进 trait 面与老板确认后再扩,不在本次臆造
+//!    是否进 trait 面与所有者确认后再扩,不在本次臆造
 //! 6. 多用户 `contract_id` 映射(demo 单用户:构造时配置一份;多用户 = 按
 //!    delegation 映射,接线时扩展)
 //! 7. 护栏凭证按渠道拆分(W-07 护栏是真实消费总闸,密钥清单含京东/智谱;
-//!    微信商户凭证账户开通后接入,届时与老板确认清单拆分方式)
+//!    微信商户凭证账户开通后接入,届时与所有者确认清单拆分方式)
 
 use std::fmt;
 use std::sync::Arc;

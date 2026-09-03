@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 钉死 1.96.0:可复现门禁(公开仓同款 W-46 回带;最新稳定版曾踩新 lint)。
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy

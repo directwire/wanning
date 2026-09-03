@@ -1,14 +1,14 @@
 //! 审计锚点 v2(W-31):**ed25519 第三方可验**——W-23 诚实边界的升级收口。
 //!
-//! v1(HMAC-SHA256,见 [`wanning_core::anchor`])的验证方 = 持密钥的老板,
+//! v1(HMAC-SHA256,见 [`wanning_core::anchor`])的验证方 = 持密钥的所有者,
 //! 第三方无法独立验证。v2 换成 ed25519 非对称签名:**公钥随锚点走**,第三方
 //! 拿锚点 + WAL(零密钥文件)就能验——独立 bin `wanning-anchor-verify`。
 //!
-//! **依赖决策(A 案,落 master-plan 决策记录)**:ed25519 手写不可接受——
+//! **依赖决策(A 案,落决策记录)**:ed25519 手写不可接受——
 //! SHA-256 当年能手写(W-23)是因为 spec 短、测试向量密;曲线实现的小错误
 //! (点校验/延展性/边角 case)是致命的,必须用经过大量实战检验的实现。
 //! 引 `ed25519-dalek` 2.x——本仓第一个**运行时**外部加密依赖,只进 demo
-//! 工具面(老板侧 CLI);core/闸/MCP/SDK 依赖树零增长(锚点签名/验签不进
+//! 工具面(所有者侧 CLI);core/闸/MCP/SDK 依赖树零增长(锚点签名/验签不进
 //! 闸的任何面,与 W-23「MCP 面永不提供锚点能力」同一信任边界)。
 //!
 //! **v2 格式**(`wanning-anchor-v2`,显式 `"version": 2`):
@@ -23,8 +23,8 @@
 //! **公钥属于被签内容**:只换公钥不改签名,验签当场现形。
 //!
 //! **诚实边界(非对称签名解决不了的那一半)**:签名只证明「持对应私钥者签的」,
-//! 不证明「持钥者是老板」。攻击者可以换上自己的公钥重签(文件内部自洽)——
-//! 这一步靠**带外身份绑定**堵:第三方从老板公开渠道核对锚点里的公钥
+//! 不证明「持钥者是所有者」。攻击者可以换上自己的公钥重签(文件内部自洽)——
+//! 这一步靠**带外身份绑定**堵:第三方从所有者公开渠道核对锚点里的公钥
 //! (`--expect-key` 钉定;钉定后换钥当场 fail-closed)。不钉定时,内部自洽的
 //! 换钥锚点验得过——这个边界写进了测试,不藏着。
 //!
@@ -49,7 +49,7 @@ pub const ANCHOR_SCHEMA_V2: &str = "wanning-anchor-v2";
 pub const ANCHOR_VERSION_V2: u32 = 2;
 
 /// ed25519 签名种子(32 字节 = ed25519 私钥的种子形态)。签名动作与 W-23
-/// 同一信任边界:**老板在闸外亲手做**,种子文件不在任何 Wanning 进程手里;
+/// 同一信任边界:**所有者在闸外亲手做**,种子文件不在任何 Wanning 进程手里;
 /// [`Debug`](std::fmt::Debug) 一律打码,密钥不进日志。
 #[derive(Clone, PartialEq, Eq)]
 pub struct Ed25519Seed([u8; 32]);
@@ -79,7 +79,7 @@ impl Ed25519Seed {
     }
 }
 
-/// 锚点文件 v2(落盘形态)。签名由老板种子对 [`canonical_payload_v2`] 计算。
+/// 锚点文件 v2(落盘形态)。签名由所有者种子对 [`canonical_payload_v2`] 计算。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnchorFileV2 {
@@ -157,7 +157,7 @@ pub fn verify_ed25519_hex(
 /// 签出锚点 v2:对账 → 材料 → ed25519 签名 → 原子落盘。
 ///
 /// 对账先行([`build_report`]):坏账绝不签(与 v1 [`crate::anchor_cmd::sign`]
-/// 同一纪律);空账同样拒。签名密钥 = 老板的 32 字节种子文件,不在任何
+/// 同一纪律);空账同样拒。签名密钥 = 所有者的 32 字节种子文件,不在任何
 /// Wanning 进程手里。
 pub fn sign_v2(
     wal_path: &Path,
@@ -203,7 +203,7 @@ pub fn sign_v2(
     Ok(file)
 }
 
-/// v2 验签产出(打印给第三方/老板看的对账结果)。
+/// v2 验签产出(打印给第三方/所有者看的对账结果)。
 #[derive(Debug, PartialEq, Eq)]
 pub struct VerifyOutcomeV2 {
     pub anchored_lines: u64,

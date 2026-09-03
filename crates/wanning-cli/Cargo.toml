@@ -1,0 +1,25 @@
+[package]
+name = "wanning-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wanning 统一 CLI 入口:init / audit / ui / demo / anchor-verify"
+
+[lib]
+name = "wanning_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wanning"
+path = "src/main.rs"
+
+[dependencies]
+wanning-core.workspace = true
+wanning-demo.workspace = true
+wanning-init.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+wanning-mcp.workspace = true

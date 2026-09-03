@@ -1,7 +1,7 @@
 //! wanning-demo 的库面:真实消费 fail-closed 护栏([`guard`])、离线场景([`scenario`])、
 //! 全链 mock 闭环场景([`full_loop`],W-29)、渠道 adapter(京东 [`jd`] / 支付宝
 //! [`alipay`] / 微信 [`wechat`];共用类型在 [`channel`],传输在 [`http`])、渠道签名
-//! 管线([`signing`],W-28,报文层零网络)、静态审计回放页([`audit_html`])、老板侧
+//! 管线([`signing`],W-28,报文层零网络)、静态审计回放页([`audit_html`])、所有者侧
 //! 审计锚点命令([`anchor_cmd`],W-23,HMAC v1)与第三方可验锚点 v2([`anchor_v2`],
 //! W-31,ed25519)、本地 JSON mock server([`mock_server`],场景运行时与集成测试共用)。
 //!
@@ -13,6 +13,8 @@ pub mod anchor_cmd;
 pub mod anchor_v2;
 pub mod audit_html;
 pub mod channel;
+/// CLI 主体(W-43a):`wanning-demo` 旧 bin 与统一入口 `wanning demo` 共用。
+pub mod cli;
 pub mod decision;
 pub mod full_loop;
 pub mod guard;

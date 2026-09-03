@@ -11,7 +11,7 @@
 2. Claude Code:项目根 `.mcp.json` [直核];spawn 进程的 **cwd 不保证是项目根**,官方注入 `CLAUDE_PROJECT_DIR`,路径写 `${CLAUDE_PROJECT_DIR:-.}` [直核];项目级 server 交互会话要用户批准一次,`claude -p`/SDK 免批 [直核+**W-19 实测**:未信任目录、`~/.claude.json` 零条目的裸 `-p` 直接 `status=connected`,无需批准无需 flag;`claude mcp list` 显示的 `⏸ Pending approval` 只是交互会话批准簿记,不拦 `-p`]。
    **协议版本(W-19 实测)**:claude 2.1.234 的 initialize 提议 `2025-11-25`;server 不支持来版时按 spec「Version Negotiation」回**自己支持的最高版**(不是报错)——W-15 旧实现回 -32602 被 claude 判死连接,已修。
 3. Trae:项目根 `.trae/mcp.json`(须在设置里开「启用项目级 MCP」),字段 `command/args/env`,唯一支持的变量 `${workspaceFolder}` [直核]。
-4. Kimi Code CLI(现役,本机 0.39.1):`$KIMI_CODE_HOME/mcp.json`(用户级)或 `<repo>/.kimi-code/mcp.json`(项目级),`mcpServers` 结构、**无 `type` 字段**、无 `${...}` 变量 → 绝对路径;TUI 内 `/mcp-config` 管理;**无 `kimi mcp` 子命令** [直核,W-40 本机实测——W-17 记录的 `kimi mcp add` 属 legacy kimi-cli 挂法(老板机器有迁移痕迹),详见 `docs/research/kimi-code-cli.md`]。
+4. Kimi Code CLI(现役,本机 0.39.1):`$KIMI_CODE_HOME/mcp.json`(用户级)或 `<repo>/.kimi-code/mcp.json`(项目级),`mcpServers` 结构、**无 `type` 字段**、无 `${...}` 变量 → 绝对路径;TUI 内 `/mcp-config` 管理;**无 `kimi mcp` 子命令** [直核,W-40 本机实测——W-17 记录的 `kimi mcp add` 属 legacy kimi-cli 挂法(所有者机器有迁移痕迹),详见 `docs/research/kimi-code-cli.md`]。
 5. WorkBuddy:`.workbuddy/mcp.json`(用户级 `~/.workbuddy/mcp.json` 或项目级 `<项目目录>/.workbuddy/mcp.json`),`mcpServers` 结构同款,官方示例无 `type` 字段、未提及 `${...}` 变量 [直核,W-37 破冰——首轮查不到,换路数(sitemap 绕 JS 首页)后破,详见 `docs/research/workbuddy.md`]。
 6. 本仓已带配置:`.mcp.json` + `.trae/mcp.json`,默认审计 `<仓库根>/target/mcp-demo.wal`(gitignore 不入库);配置契约有测试锁定(`crates/wanning-mcp/tests/mcp_json_config.rs`),`cargo run` 两会话实录在档。
 7. 踩坑已修(W-17):同一 WAL 二次启动曾**不回放旧账**(nonce 洗白/撤销被复活)→ `WanningState::live_resuming`(回放对账 fail-closed → 系统时钟续写同一 WAL)。
@@ -43,7 +43,7 @@ Configuration 页(`llms-full.txt`,2026-09-02 抓取)+ 本机 0.39.1 隔离实验
 kimi-cli README(<https://github.com/MoonshotAI/kimi-cli>,W-17 抓取)。
 
 - **两代产品**:W-17 直核的 `kimi mcp add --transport stdio` / `--mcp-config-file`
-  属 legacy kimi-cli(README 自述将收摊);老板机器已迁移到 **kimi-code 0.39.1**
+  属 legacy kimi-cli(README 自述将收摊);所有者机器已迁移到 **kimi-code 0.39.1**
   (`~/.kimi` → `~/.kimi-code`,迁移痕迹实测在档),现役版**无 `kimi mcp` 子命令**。
 - **现役挂法**:用户级 `$KIMI_CODE_HOME/mcp.json` 或项目级 `<repo>/.kimi-code/mcp.json`
   (同名项目级覆盖用户级),`mcpServers` → `command`/`args`/`env`/`cwd` 等;
@@ -55,9 +55,8 @@ kimi-cli README(<https://github.com/MoonshotAI/kimi-cli>,W-17 抓取)。
 - **W-40 本机实测**:隔离 `KIMI_CODE_HOME` + 手写 mcp.json 挂 wanning-mcp,真 kimi
   二进制拉起闸、注入两工具,三轮判定落 WAL(allow 500 分 / 同 nonce replay 拒 /
   over_budget 拒),跨会话同账、完整性链连续;模型侧为本地 mock(真实模型会话
-  复证待老板放行烧额度;W-42 修正 2026-09-02:登录凭证 2026-08-30 已在档,
-  「待登录」出自隔离空 home 报错)。取证见 `docs/tasks/P0-demo-closedloop.md`
-  W-40 节。
+  复证待所有者放行烧额度;W-42 修正 2026-09-02:登录凭证 2026-08-30 已在档,
+  「待登录」出自隔离空 home 报错)。取证在档(W-40 节)。
 - 生成器已按现役挂法修订(`wanning-init --platform kimi` 输出 mcp.json 内容,
   W-40 契约测试换血)。
 
@@ -65,6 +64,54 @@ kimi-cli README(<https://github.com/MoonshotAI/kimi-cli>,W-17 抓取)。
 
 - W-17 首轮:检索(搜狗)显示其为腾讯 CodeBuddy 团队的 AI agent 办公产品,官网域名 `workbuddy.cn` [摘要];直接抓首页 JS 渲染、正文为空 [直核失败] → 当轮结论「查不到待人工」。
 - **W-37 攻坚轮(2026-09-02)换路数破冰**:robots.txt → sitemap.xml 索引 → docs 子树 sitemap(94 页正文清单)→ `MCP-Guide` 页直核。结论:腾讯出品的 AI 办公工作台(桌面应用),**支持 MCP 客户端**,配置 `.workbuddy/mcp.json`(用户级 `~/.workbuddy/mcp.json` 或项目级 `<项目目录>/.workbuddy/mcp.json`,`mcpServers` 同款结构,无 `type`,无 `${...}` 变量),UI 路径「侧边栏 插件 → MCP 服务器 → 配置 MCP」。字段权威与查不到清单见 `docs/research/workbuddy.md`;生成器矩阵 W-37 已同步(`cargo run -p wanning-init -- --platform workbuddy`)。
+
+## DeepSeek Harness(W-44,Cordis overlay patch)[本机直核]
+
+- **与其他平台根本不同:不是 mcp.json**——Cordis overlay YAML patch:顶层 YAML
+  数组的 `- insert:` 列表声明插件(id/name/config),`--patch <file>.cordis.yml`
+  临时挂或**合并追加**进 `<profile>/cordis.patch.yml` / `$DSH_HOME/cordis.patch.yml`
+  (绝不整文件覆盖);桥接插件 `@deepseek-ai/dsh-mcp-client`,工具现身名
+  `mcp__<serverName>__<rawName>`(serverName 约束 `[A-Za-z0-9_-]{1,32}`)。
+- **本机 dsh 0.1.0-rc.7 已装**(npm 全局,W-44 直核):字段权威 = 安装版本自带
+  包内 README(`dsh-mcp-client` 字段表/`dsh-subprocess` 的 `scrubbedParentEnv`
+  env 剥离契约);隔离 `DSH_HOME` 下真二进制 `--dump-config --patch` 接受生成
+  内容,wanning 行进组合树(诚实边界:dump 级只验语法+形态,会话级待所有者放行)。
+- 生成器:`wanning-init --platform deepseek-harness`(W-44 入矩阵);
+  字段契约/取证/阻塞清单见 `docs/plugins/deepseek-harness.md`。
+
+## OpenClaw(W-45,`openclaw mcp set` CLI 写入)[本机直核]
+
+- **原生支持 MCP**(本机 2026.5.22 a374c3a):`openclaw mcp` 子命令族
+  (list/show/set/unset/serve)直接管理注册,落
+  `$OPENCLAW_STATE_DIR/openclaw.json` 的 `mcp.servers.<name>` = `{command, args}`
+  (与 Claude Code `mcpServers` 同形,无 `type` 字段)。
+- **挂法是命令行不是配置文件**:openclaw.json 由宿主管理(实测落盘含
+  commands/messages/agents/meta 骨架段),生成器产出
+  `openclaw mcp set wanning '<json>'` 一条命令,CLI 合并写入只动 wanning 一段。
+- 官方 stdio 字段面 command/args/env/cwd [文档直核];env 有安全过滤(拦
+  `NODE_OPTIONS`/`PYTHONSTARTUP`/`DYLD_*`/`LD_*` 等)→ 真实通道密钥必须写进
+  `env` 不能赌继承。
+- 隔离实测(W-45 配置面):`mcp set/list/show` 全绿;models.providers 挂本地
+  mock LLM exit 0。**agent 回合(W-47)已实测通过**:「静默退出」根因查明 =
+  缺 `-m`(报错只在 stderr)+ 缺会话选择器(`--agent main`)+ cwd 大目录
+  扫描税 16–17s;工具现身名 `<server>__<raw>`(无 `mcp__` 前缀),allow/replay
+  落 WAL、完整性链连续(插件页 W-47 节)。
+- 生成器:`wanning-init --platform openclaw`;插件页 `docs/plugins/openclaw.md`。
+
+## Hermes(W-45,`hermes mcp add` CLI 挂载)[本机直核]
+
+- **原生支持 MCP**(本机 hermes-agent v0.19.1):`hermes mcp add/list/test/remove`
+  管理注册,落 `$HERMES_HOME/config.yaml` 的 `mcp_servers.<name>` =
+  `{command, args, enabled: true}`。`mcp add` **discovery-first**:真连一次
+  发现工具,挂载即验证(实测 ✓ Connected, Found 2 tool(s), 2/2 enabled);
+  非 TTY 用 `echo y |` 管道喂 `Enable all 2 tools?` 确认。
+- **全链路隔离实测**(W-45,零外网零真实消费):`mcp test wanning` 真连 141ms;
+  one-shot `hermes -z "..." -t wanning` + 本地 mock LLM → allow 400 落 WAL,
+  二次会话同 nonce → replay 拒,完整性链连续。
+- **两个平台特有坑**(实测教训):①MCP 工具在 deferred catalog,模型侧经
+  `tool_call(name, arguments)` 间接调用,直接调 `mcp__wanning__*` 报
+  does not exist;②one-shot 默认 cli 工具集不含 MCP 工具,须显式 `-t <server名>`。
+- 生成器:`wanning-init --platform hermes`;插件页 `docs/plugins/hermes.md`。
 
 ## 消费草图(本仓已落地的部分)
 
@@ -74,15 +121,23 @@ kimi-cli README(<https://github.com/MoonshotAI/kimi-cli>,W-17 抓取)。
 - Kimi(现役挂法,用户级或项目级 `.kimi-code/mcp.json`):`wanning-init --platform kimi`
   生成 mcp.json 内容(绝对路径占位符手改;W-40 实测可用),不再用 `kimi mcp add`
   (现役版无该子命令)。
+- DeepSeek Harness(挂法 = Cordis overlay patch,非 mcp.json):`wanning-init
+  --platform deepseek-harness` 生成 `- insert:` patch 文件(`--patch` 临时挂或
+  合并追加进 cordis.patch.yml;W-44 实测 dump 门禁通过)。
+- OpenClaw / Hermes(W-45,两宿主原生 MCP):`wanning-init --platform
+  openclaw|hermes` 生成宿主 CLI 命令行(`openclaw mcp set` / `hermes mcp add`),
+  复制执行即挂;openclaw 全链路 mock 已实测(W-47),hermes 全链路已实测(W-45)。
 - **契约锁定**:`tests/mcp_json_config.rs` 解析这两份配置,断言字段/参数/路径变量,并把配置里的服务端参数原样喂给真 bin 跑完整握手——配置烂了测试当场红。
 - 已知地雷:① `cargo run` 首次触发编译,可先 `cargo build` 后把 `command` 换成二进制绝对路径;② `cargo` 必须在平台 spawn 环境 PATH 里;③ 审计在 `target/` 下,`cargo clean` 会清掉(重新演示无妨,销毁审计须自知);④ 撤销/过期后想重演,换新 WAL 路径——重启**不会**复活授权(见实测记录)。
 
-## P1 实测清单(下一步,老板或下一会话)
+## P1 实测清单(下一步,所有者或下一会话)
 
-1. ~~Claude Code:本仓目录起 `claude` → 批准项目级 server → `/mcp` 应见 `wanning` → 对话触发 `wanning_gate_evaluate` → `wanning_audit_tail` 对照 WAL 行。~~ **已完成(W-19,2026-09-02)**:headless `claude -p` 裸跑即连(无需批准/信任),三步证据链(放行→重放拒→审计对账)全过,证据见 `docs/tasks/P0-demo-closedloop.md` W-19 两节。交互会话路径(`/mcp` 面板查看)随用随验,不再是前置阻塞。
+1. ~~Claude Code:本仓目录起 `claude` → 批准项目级 server → `/mcp` 应见 `wanning` → 对话触发 `wanning_gate_evaluate` → `wanning_audit_tail` 对照 WAL 行。~~ **已完成(W-19,2026-09-02)**:headless `claude -p` 裸跑即连(无需批准/信任),三步证据链(放行→重放拒→审计对账)全过,证据在档(W-19 两节)。交互会话路径(`/mcp` 面板查看)随用随验,不再是前置阻塞。
 2. Trae:开「启用项目级 MCP」→ 确认 `${workspaceFolder}` 在 args 里真的被展开 → 同上对账。
-3. ~~Kimi Code CLI:装新版(旧 kimi-cli 将收摊)→ `kimi mcp add` 绝对路径 → 同上。~~ **挂法与闸往返已实测(W-40,2026-09-02)**:现役 kimi-code 0.39.1 无 `kimi mcp` 子命令,挂法改为 `.kimi-code/mcp.json`(生成器已修订);隔离 `KIMI_CODE_HOME` 下真 kimi 二进制完成 MCP 往返(allow/replay/over_budget 三判定落 WAL),模型侧为本地 mock。剩真实模型会话复证,待老板放行烧额度(W-42 修正:登录凭证 2026-08-30 已在档,`kimi login` 大概率可省;待实测清单)。
-4. WorkBuddy:**W-37 已破冰**(配置面直核落档,生成器已出活);剩真插实测待老板装桌面端(待实测清单)。
+3. ~~Kimi Code CLI:装新版(旧 kimi-cli 将收摊)→ `kimi mcp add` 绝对路径 → 同上。~~ **挂法与闸往返已实测(W-40,2026-09-02)**:现役 kimi-code 0.39.1 无 `kimi mcp` 子命令,挂法改为 `.kimi-code/mcp.json`(生成器已修订);隔离 `KIMI_CODE_HOME` 下真 kimi 二进制完成 MCP 往返(allow/replay/over_budget 三判定落 WAL),模型侧为本地 mock。剩真实模型会话复证,待所有者放行烧额度(W-42 修正:登录凭证 2026-08-30 已在档,`kimi login` 大概率可省;待实测清单)。
+4. WorkBuddy:**W-37 已破冰**(配置面直核落档,生成器已出活);剩真插实测待所有者装桌面端(待实测清单)。
+5. OpenClaw:**agent 回合端到端已完成(W-47,隔离 mock)**——「静默退出」根因查明(缺 `-m` + 缺会话选择器 + cwd 扫描税),工具现身/allow/replay 落 WAL/链连续全过;剩真实模型会话复证(env 安全过滤逐键行为顺带验),待所有者放行(红线 2)。
+6. Hermes:全链路已实测(W-45,模型侧 mock);剩真实模型会话复证 + 交互 TUI 会话(需 TTY),待所有者放行(红线 2)。
 
 ## W-19 排障踩坑(Windows + git-bash,给下一会话省命)
 

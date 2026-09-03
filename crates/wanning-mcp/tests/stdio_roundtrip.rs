@@ -375,7 +375,7 @@ fn second_startup_on_same_wal_is_idempotent_and_state_survives() {
 
 #[test]
 fn revoked_delegation_is_never_resurrected_by_restart() {
-    // 预置一份 demo-d1 已撤销的 WAL(撤销只能老板侧做:MCP 工具面没有撤销)。
+    // 预置一份 demo-d1 已撤销的 WAL(撤销只能所有者侧做:MCP 工具面没有撤销)。
     use wanning_core::clock::{Clock, SystemClock};
     use wanning_core::delegation::Delegation;
     use wanning_core::state::WanningState;
@@ -387,7 +387,7 @@ fn revoked_delegation_is_never_resurrected_by_restart() {
         state
             .register_delegation(Delegation::new(
                 "demo-d1",
-                "老板",
+                "所有者",
                 "mcp-client",
                 1_000,
                 now,
@@ -434,7 +434,7 @@ fn server_refuses_to_start_while_another_process_holds_the_wal() {
     holder
         .register_delegation(Delegation::new(
             "demo-d1",
-            "老板",
+            "所有者",
             "mcp-client",
             1_000,
             now,

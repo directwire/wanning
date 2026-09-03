@@ -1,14 +1,14 @@
 [package]
 name = "wanning-mcp"
-description = "Wanning MCP stdio server:把闸的两件工具(wanning_gate_evaluate / wanning_audit_tail)插进支持 MCP 的 agent"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Wanning 支付闸 MCP server:预算/撤销/审计三闸门挂在任意 MCP 客户端上"
 
 [dependencies]
-wanning-core = { path = "../wanning-core", version = "0.1.0" }
+wanning-core.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

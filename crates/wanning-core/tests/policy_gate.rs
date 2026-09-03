@@ -10,7 +10,7 @@
 //! - 速率 = 滑动窗口整数秒;恰在窗口结束时刻,更早一笔不再计入(半开,口径与
 //!   过期语义一致:阻塞在 `t + window` 时刻结束)。拒绝不计数、不耗号。
 //! - 类目未知(不在表内)= 无类目预算,**fail-open**(总预算仍管)——任务书 W-27
-//!   指定口径,理由落 master-plan 决策记录;空白类目按无类目处理。
+//!   指定口径,理由落决策记录;空白类目按无类目处理。
 //! - 类目上限 0 = 合法,语义为「禁该类目」(与总预算 0 拒收不同:类目 0 只关一个
 //!   类目,是刻意的禁止表达)。
 //! - 商户名单 deny 优先(同时在两份名单 = 拒);allow 空 = 不设白名单。
@@ -209,7 +209,7 @@ fn category_budget_denies_over_category_while_total_has_room() {
 #[test]
 fn category_unknown_or_blank_is_fail_open() {
     // 任务书 W-27 指定口径:类目未知 = 无类目预算,放行(总预算仍管)。
-    // fail-open 理由落 master-plan 决策记录;此测试锁定该口径不被悄悄改掉。
+    // fail-open 理由落决策记录;此测试锁定该口径不被悄悄改掉。
     let policy = SpendPolicy {
         category_caps_cents: BTreeMap::from([("grocery".to_string(), 1)]),
         ..SpendPolicy::default()

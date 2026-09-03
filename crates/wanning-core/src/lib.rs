@@ -32,8 +32,9 @@
 //! | [`wal`] | 审计日志(append-only JSONL)+ 回放重建 |
 //! | [`state`] | 运行时状态:闸 + 审计(write-ahead)+ 时钟;`replay` 重建 |
 //! | [`clock`] | 可注入时钟(测试不 sleep,过期语义可控) |
+//! | [`paths`] | 默认路径(W-43a):`~/.wanning` 解析与 WAL 目录自动创建 |
 //! | [`sha256`] | SHA-256(FIPS 180-4,零依赖手写;W-23 锚点的底层哈希) |
-//! | [`anchor`] | 审计锚点(W-23):老板侧密钥锚住链尾,堵住 W-21 已知边界 |
+//! | [`anchor`] | 审计锚点(W-23):所有者侧密钥锚住链尾,堵住 W-21 已知边界 |
 //!
 //! 合规边界见 `docs/compliance-redlines.md`(无豁免):本 crate 是意图层软件,
 //! 资金路径永远是「用户实名支付工具 → 商户」,没有任何我们的位置。
@@ -45,6 +46,7 @@ pub mod delegation;
 pub mod error;
 pub mod gate;
 pub mod intent;
+pub mod paths;
 pub mod policy;
 pub mod replay;
 pub mod revocation;

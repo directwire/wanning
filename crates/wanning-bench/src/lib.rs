@@ -170,7 +170,7 @@ fn bench_gate(allow: bool, ops: usize, rounds: usize) -> Result<BenchStats, Core
 fn bench_delegation() -> Delegation {
     Delegation::new(
         "d1",
-        "老板",
+        "所有者",
         "bench-agent",
         BENCH_CAP_CENTS,
         BENCH_TS,

@@ -10,13 +10,13 @@ repository.workspace = true
 default-run = "wanning-demo"
 
 [dependencies]
-wanning-core = { path = "../wanning-core", version = "0.1.0" }
+wanning-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
 # W-31(A 案,本仓第一个运行时外部加密依赖):审计锚点 v2 的 ed25519 签名/验签。
 # 非对称签名手写不可接受——哈希能手写因为 spec 短、向量密;曲线实现边缘 case
-# 致命。只进本 crate(老板侧工具面):core/闸/MCP/SDK 依赖树零增长。
+# 致命。只进本 crate(所有者侧工具面):core/闸/MCP/SDK 依赖树零增长。
 ed25519-dalek = "2"
 
 # W-28:签名管线只做报文层,本仓不自带任何加密实现(运行时依赖树零新增)。

@@ -1,8 +1,8 @@
-//! 审计锚点(W-23):**老板侧密钥**锚住 WAL 前缀,堵住完整性链的已知边界。
+//! 审计锚点(W-23):**所有者侧密钥**锚住 WAL 前缀,堵住完整性链的已知边界。
 //!
 //! W-21 的完整性链有一个诚实声明过的盲区(见 [`crate::wal`] 模块注释):最后一行
 //! 没有后继行引用它——**只改尾行内容**或**整体截尾**,链自身验不住。本模块给的
-//! 抓法:老板用**自己的密钥**(不在任何 Wanning 进程手里)对「前 N 行内容 + 行数 +
+//! 抓法:所有者用**自己的密钥**(不在任何 Wanning 进程手里)对「前 N 行内容 + 行数 +
 //! 链尾」算一个 HMAC-SHA256,锚点文件另行保管;此后任何时候再验——
 //!
 //! - 截尾 → 当前 WAL 行数 < 锚点行数,当场现形;
@@ -11,7 +11,7 @@
 //!
 //! **为什么这里用 HMAC 而 W-21 明说不用的那一个**:W-21 反对的是「密钥在写进程
 //! 手里」——写进程(agent)既能写日志又能算 MAC,防线形同虚设。锚点的密钥在
-//! **老板**手里,写进程从头到尾接触不到;签名动作(`--anchor-sign`)是老板拿着
+//! **所有者**手里,写进程从头到尾接触不到;签名动作(`--anchor-sign`)是所有者拿着
 //! 密钥文件在闸外做的,闸的 MCP 工具面永不提供锚点能力(agent 能签就能伪造锚点)。
 //! 密钥保管是人的程序,和真实消费护栏(W-07)同一个信任边界。
 //!
@@ -20,14 +20,14 @@
 //! 密码学哈希。锚点载荷里同时带上 FNV 链尾(人能和 W-22 回放页肉眼对账)与
 //! SHA-256 内容哈希(密码学强度),两者各司其职。
 //!
-//! **诚实边界(已由 v2 升级收口)**:HMAC 的验证方需要密钥——v1 锚点只有老板
+//! **诚实边界(已由 v2 升级收口)**:HMAC 的验证方需要密钥——v1 锚点只有所有者
 //! (持密钥者)能验。W-31 起新增 **锚点 v2 = ed25519 非对称签名,公钥随锚点走,
 //! 第三方零密钥即可验**(独立 bin `wanning-anchor-verify`,见 demo crate 的
 //! `anchor_v2` 模块);本模块的 HMAC v1 模式保留(向后兼容,锚点文件带 version
 //! 字段)。v2 复用本模块的材料/载荷纪律与 `assert_wal_matches_anchor` 比对。
 //!
 //! 验证顺序即 fail-closed 顺序:先验锚点本身可信([`verify_anchor_file`]:MAC 对
-//! 不上 = 锚点不是老板签的或锚点被改),再读 WAL 验完整性链,最后逐字段比对
+//! 不上 = 锚点不是所有者签的或锚点被改),再读 WAL 验完整性链,最后逐字段比对
 //! ([`assert_material_matches`])。任何一步不过都报错,绝不给出「部分通过」。
 
 use serde::{Deserialize, Serialize};
@@ -115,7 +115,7 @@ pub fn canonical_payload(material: &AnchorMaterial, anchored_at_unix: u64) -> St
     )
 }
 
-/// 锚点文件(落盘形态)。MAC 由老板密钥对 [`canonical_payload`] 计算。
+/// 锚点文件(落盘形态)。MAC 由所有者密钥对 [`canonical_payload`] 计算。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnchorFile {
@@ -161,7 +161,7 @@ pub fn sign_anchor(material: &AnchorMaterial, key: &[u8; 32], anchored_at_unix: 
     }
 }
 
-/// 验锚点文件本身可信:MAC 与老板密钥对得上,字段读得懂。
+/// 验锚点文件本身可信:MAC 与所有者密钥对得上,字段读得懂。
 /// 通过则返回它声明的材料(交给 [`assert_material_matches`] 对 WAL)。
 pub fn verify_anchor_file(file: &AnchorFile, key: &[u8; 32]) -> Result<AnchorMaterial, CoreError> {
     if file.schema != ANCHOR_SCHEMA {
@@ -186,7 +186,7 @@ pub fn verify_anchor_file(file: &AnchorFile, key: &[u8; 32]) -> Result<AnchorMat
     if !constant_time_eq(&expected, &claimed) {
         // 不泄露哪个字段「差一点」:MAC 不符就是整个锚点不可信。
         return Err(CoreError::AnchorInvalid(
-            "锚点 MAC 与老板密钥对不上——锚点不是老板签的,或锚点文件被改过".to_string(),
+            "锚点 MAC 与所有者密钥对不上——锚点不是所有者签的,或锚点文件被改过".to_string(),
         ));
     }
     Ok(material)
@@ -347,8 +347,15 @@ mod tests {
         use crate::delegation::Delegation;
         use crate::intent::SpendIntent;
         use crate::wal::WalDecision;
-        let delegation =
-            Delegation::new("d1", "老板", "agent-1", 10_00, 1_000, 2_000, "wanning-test");
+        let delegation = Delegation::new(
+            "d1",
+            "所有者",
+            "agent-1",
+            10_00,
+            1_000,
+            2_000,
+            "wanning-test",
+        );
         vec![
             (
                 1,

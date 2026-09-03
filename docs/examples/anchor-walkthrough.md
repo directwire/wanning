@@ -1,7 +1,7 @@
-# 锚点签验走查(老板视角,W-33)
+# 锚点签验走查(所有者视角,W-33)
 
 > 完整性链(W-21)有两个本地验不住的盲区:**只改最后一行内容**(无后继行引用)
-> 与**整体截尾**(余下前缀自成合法链)。外部锚点是兜底。本页是老板视角的两条
+> 与**整体截尾**(余下前缀自成合法链)。外部锚点是兜底。本页是所有者视角的两条
 > 命令走查;语义与诚实边界全文见 `README.md` 锚点节。
 
 ## 第 0 步:造一份样账(演示用;真实场景跳过这步)
@@ -10,10 +10,10 @@
 cargo run -p wanning-demo -- --scenario full-loop-mock   # 输出末尾打印 WAL 路径
 ```
 
-## v1(HMAC,只有老板能验)——两条命令
+## v1(HMAC,只有所有者能验)——两条命令
 
 ```bash
-# 签:老板用自己的密钥(32 字节 = 64 位十六进制文件,绝不入仓)锚住前 N 行
+# 签:所有者用自己的密钥(32 字节 = 64 位十六进制文件,绝不入仓)锚住前 N 行
 cargo run -p wanning-demo -- --anchor-sign <审计文件.jsonl> --key key.hex --out anchor.json
 
 # 验:改尾行/截尾当场 exit 1;锚定后合法追加不影响通过(前缀锚语义)
@@ -23,10 +23,10 @@ cargo run -p wanning-demo -- --anchor-verify <审计文件.jsonl> --anchor ancho
 ## v2(ed25519,第三方零密钥可验,W-31)——三条命令
 
 ```bash
-# 签:老板用自己的种子(32 字节 ed25519,纪律同 --key)
+# 签:所有者用自己的种子(32 字节 ed25519,纪律同 --key)
 cargo run -p wanning-demo -- --anchor-sign-v2 <审计文件.jsonl> --seed seed.hex --out anchor.json
 
-# 验(老板或任何第三方,零密钥文件;先 cargo build -p wanning-demo)
+# 验(所有者或任何第三方,零密钥文件;先 cargo build -p wanning-demo)
 cargo run -p wanning-demo --bin wanning-anchor-verify -- \
   --anchor anchor.json --wal <审计文件.jsonl>
 
@@ -37,7 +37,7 @@ cargo run -p wanning-demo --bin wanning-anchor-verify -- \
 ```
 
 - 被签载荷 `WANNING-ANCHOR-v2` 含 `public_key=` 行:只换公钥不改签名,验签现形。
-- **诚实边界**:签名只证明「持对应私钥者签的」,不证明「持钥者是老板」——不钉定
+- **诚实边界**:签名只证明「持对应私钥者签的」,不证明「持钥者是所有者」——不钉定
   期望公钥时,换钥重签的锚点内部自洽、验得过(回执照样打印提示);身份绑定在带外。
 
 ## 眼见为实(30 秒)

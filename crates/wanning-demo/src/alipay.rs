@@ -14,7 +14,7 @@
 //!   真实产品/接口/字段名在 W-13 调研 + 账户开通后填充,绝不臆造。
 //!
 //! 共用类型(trait/请求/回调幂等/错误)在 [`crate::channel`];这里 `pub use` 再导出,
-//! 既有引用路径(`wanning_demo::alipay::…`,W-11 测试与 whitepaper 引用)保持有效。
+//! 既有引用路径(`wanning_demo::alipay::…`,W-11 测试引用)保持有效。
 //!
 //! TODO(账户开通后)清单(见各处注释):
 //! 1. 真实产品形态与网关:周期扣款在支付宝开放平台的对应产品与接口名(W-13 调研)
@@ -33,7 +33,7 @@ use crate::guard::{check_real_spend, EnvSnapshot, RealSpendConfig};
 use crate::http::{ApiTransport, HttpFailure, UreqApiTransport};
 
 // 共用类型从 [`crate::channel`] 引入并**整体再导出**:既有引用路径
-// (`wanning_demo::alipay::…`,W-11 测试与 whitepaper 引用)保持有效。
+// (`wanning_demo::alipay::…`,W-11 测试引用)保持有效。
 pub use crate::channel::{
     apply_pay_notify, PayNotify, PayRequest, PayResult, PayStatus, PaymentChannel, PaymentError,
     TradeState,

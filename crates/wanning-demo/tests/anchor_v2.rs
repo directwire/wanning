@@ -3,7 +3,7 @@
 //! W-23 的诚实边界「HMAC 对称,第三方不可独立验证」由本任务升级:锚点 v2 用
 //! ed25519 非对称签名,**公钥随锚点走**,第三方无需任何密钥文件即可验
 //! (`wanning-anchor-verify` bin)。HMAC v1 模式保留(向后兼容,锚点文件带
-//! version 字段)。依赖决策(A 案,落 master-plan 决策记录):ed25519 手写
+//! version 字段)。依赖决策(A 案,落决策记录):ed25519 手写
 //! 不可接受——哈希能手写因为 spec 短、向量密;曲线实现边缘 case 致命,
 //! 引 `ed25519-dalek`(本仓第一个运行时外部加密依赖,只进 demo 工具面,
 //! core/闸/MCP/SDK 依赖树零增长)。
@@ -48,7 +48,7 @@ fn build_sample_wal(path: &Path) {
     state
         .register_delegation(Delegation::new(
             "d1",
-            "老板",
+            "所有者",
             "claude-code",
             1_000,
             1_700_000_000,
@@ -291,8 +291,8 @@ fn verify_v2_fails_when_public_key_swapped_and_pin_catches_it() {
     .expect("写换钥锚点");
 
     // **诚实边界**:不钉期望公钥时,内部自洽的换钥锚点验得过——非对称签名
-    // 只证明「持钥者签的」,不证明「持钥者是老板」;身份绑定在带外
-    // (第三方从老板公开渠道核对公钥)。
+    // 只证明「持钥者签的」,不证明「持钥者是所有者」;身份绑定在带外
+    // (第三方从所有者公开渠道核对公钥)。
     assert!(
         verify_v2(&wal, &swapped_path, None).is_ok(),
         "无钉定时换钥锚点内部自洽(边界如实落测试)"
@@ -306,7 +306,7 @@ fn verify_v2_fails_when_public_key_swapped_and_pin_catches_it() {
     // 钉对公钥 → 正常锚点照常过。
     assert!(verify_v2(&wal, &anchor_path, Some(&legit.public_key_hex)).is_ok());
 
-    // 只换公钥不换签名(签名还是老板的)→ 验签不过。
+    // 只换公钥不换签名(签名还是所有者的)→ 验签不过。
     let mut key_only: AnchorFileV2 =
         serde_json::from_str(&std::fs::read_to_string(&anchor_path).expect("读锚点"))
             .expect("锚点是 JSON");
@@ -452,7 +452,7 @@ fn seed_file_parsing_is_strict_and_masked() {
 }
 
 // ---------------------------------------------------------------------------
-// CLI --anchor-sign-v2(老板侧签出)端到端
+// CLI --anchor-sign-v2(所有者侧签出)端到端
 // ---------------------------------------------------------------------------
 
 #[test]

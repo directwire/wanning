@@ -18,8 +18,14 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 fn tmp_wal(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("wanning-sdk-tests");
     std::fs::create_dir_all(&dir).expect("建临时目录");
+    // pid + 原子序号 + 纳秒:序号每轮从 0 重新计数,pid 被复用时跨轮仍会撞名,
+    // 纳秒补上跨轮唯一性(W-21 教训,W-43b 轮补齐)。
     let n = SEQ.fetch_add(1, Ordering::SeqCst);
-    dir.join(format!("{tag}-{}-{n}.jsonl", std::process::id()))
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!("{tag}-{}-{n}-{nanos}.jsonl", std::process::id()))
 }
 
 /// ¥10 总预算、系统时钟下长期有效、nonce 作用域 agent:x 的委托。
