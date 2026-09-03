@@ -95,9 +95,11 @@ jobs:
           merge-multiple: true
 
       # 软件无网络消费面(闸本体零外联),发布动作本身只是文件上传;真跑等 remote。
+      # gh 需显式 --repo(本 job 无 checkout,gh 靠 git remote 推仓库名会失败)。
       - name: Create the tag release and attach archives
         run: |
           gh release create "${GITHUB_REF_NAME}" wanning-*.tar.gz \
+            --repo "${GITHUB_REPOSITORY}" \
             --title "wanning ${GITHUB_REF_NAME}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
