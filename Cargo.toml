@@ -14,9 +14,10 @@ members = [
 # 0.1.0 已由所有者(changshenhan)2026-09-02 发布上 crates.io(五 crate;早于 W-43a 的
 # paths/默认预算/统一 CLI)。已发布版本不可重发 → 版本整体随内容推进(0.1.1 =
 # W-43 三砖;0.1.2 = W-50 支付宝官方模板 + W-51 无缝链路 init --install/doctor;
+# 0.1.4 = W-57 L1 签名自测语义修正(私钥派生公钥复核,平台公钥改挂 L2),
 # 0.1.3 = W-52 channel-test 渠道钥匙验证 + W-53 人在环待支付(第一形态)),
 # 按依赖序(core → sdk/mcp/init → demo → cli → bench)发布。
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["changshenhan"]
 # 双许可 = Rust 生态默认(W-43c 发布就绪;真发布动作=所有者)。
@@ -33,11 +34,11 @@ serde_json = "1"
 ureq = "2"
 # 仓内依赖集中在此:path 本地解析,发布时按 version 走 crates.io——版本只此一处,
 # 升级改这一行(W-43c;publish 验证要求 path 依赖必须带 version)。
-wanning-core = { path = "crates/wanning-core", version = "0.1.3" }
-wanning-sdk = { path = "crates/wanning-sdk", version = "0.1.3" }
-wanning-mcp = { path = "crates/wanning-mcp", version = "0.1.3" }
-wanning-init = { path = "crates/wanning-init", version = "0.1.3" }
-wanning-demo = { path = "crates/wanning-demo", version = "0.1.3" }
+wanning-core = { path = "crates/wanning-core", version = "0.1.4" }
+wanning-sdk = { path = "crates/wanning-sdk", version = "0.1.4" }
+wanning-mcp = { path = "crates/wanning-mcp", version = "0.1.4" }
+wanning-init = { path = "crates/wanning-init", version = "0.1.4" }
+wanning-demo = { path = "crates/wanning-demo", version = "0.1.4" }
 
 [profile.release]
 lto = "thin"

@@ -82,7 +82,9 @@ wanning confirm <单号> --amount <同额元> --proof <交易号>   ← 人的�
 cargo install wanning-cli        # 装 wanning 一个二进制,覆盖 init/audit/ui/demo/anchor-verify
 ```
 
-诚实状态:七个 crate 的 **0.1.3 已上 crates.io**(2026-09-04,含**人在环待支付
+诚实状态:七个 crate 的 **0.1.4 已上 crates.io**(2026-09-04,W-57 修复:
+channel-test L1 签名自测改「私钥派生公钥复核」、平台公钥槽位改挂 L2 前置——
+支付宝双钥模型下旧 L1 口径对任何正确部署都必挂;0.1.3 = 2026-09-04 **人在环待支付
 第一形态**(`pending_pay` 默认档 + `wanning confirm` 人工确认)与 **channel-test
 渠道钥匙验证**;0.1.2 = 2026-09-03 统一 CLI 入口 `wanning-cli` +
 `wanning init --install` 一键直写 + `wanning doctor` 体检 + 支付宝官方报文模板;
@@ -96,8 +98,8 @@ cargo install wanning-cli        # 装 wanning 一个二进制,覆盖 init/audit
 # x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu / aarch64-apple-darwin(.github/workflows/release.yml)
 ```
 
-诚实状态:v0.1.0 / v0.1.1 / v0.1.2 release 在本仓真跑绿过(三平台二进制 +
-SHA256SUMS);v0.1.3 tag push 后同 workflow 出新一版,以实际产物为准。
+诚实状态:v0.1.0 / v0.1.1 / v0.1.2 / v0.1.3 release 在本仓真跑绿过(三平台二进制 +
+SHA256SUMS);v0.1.4 tag push 后同 workflow 出新一版,以实际产物为准。
 
 **路线 3 · 源码构建(今天就能用)**:
 
