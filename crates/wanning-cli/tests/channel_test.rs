@@ -7,8 +7,10 @@
 //! ② 缺省(无 `--real`)= 只到 L1,**零网络零落账**:传输替身捕获 0 请求 + 探针
 //!    账本文件不存在 = 直接证据,stdout 契约同步锁定;
 //! ③ L1 签名自测:现场自生成测试 RSA 密钥对(W-28/W-50 先例,自生成自销毁,
-//!    绝不真密钥绝不落仓)真签真验;「私钥/公钥不是一对」当场现形且零出网;
-//!    裸 base64 DER 与 PEM 外壳两种密钥形态都收(W-52 parse 的分派面);
+//!    绝不真密钥绝不落仓)真签 + 私钥派生公钥复核(W-57 口径:商户私钥签的
+//!    请求由支付宝用上传的应用公钥验,平台公钥验不了请求——L1 不消费平台公钥
+//!    槽位,零出网);裸 base64 DER 与 PEM 外壳两种密钥形态都收(W-52 parse 的
+//!    分派面);平台公钥槽位改挂 L2 前置,缺失 = L2 门口 fail-closed;
 //! ④ L2 网关探针报文同源:method=alipay.trade.precreate、product_code=
 //!    FACE_TO_FACE_PAYMENT、金额 0.01 元(官方 total_amount 最小值)、无协议号
 //!    语义——全部复用 W-50 官方模板管线,不另写字段面;响应验签共用信封管线
@@ -108,7 +110,8 @@ fn wrap_pem(label: &str, b64: &str) -> String {
     out
 }
 
-/// L1 槽位(签名自测前置密钥)。
+/// L1 槽位(商户私钥 = L1 前置;支付宝公钥 = L2 验响应用,L1 不消费——一并注入
+/// 是真实操作者的常态材料面)。
 fn l1_env(keys: &TestKeys) -> ProbeEnv {
     let mut env = ProbeEnv::default();
     env.set(SLOT_ALIPAY_MERCHANT_PRIVATE_KEY, &keys.merchant_private);
@@ -510,7 +513,10 @@ fn l0_missing_keys_stop_before_any_io() {
     assert_eq!(code, 1, "缺 L1 密钥 = 运行失败:{stdout}{stderr}");
     assert!(stderr.contains("L1 前置密钥未齐"), "{stderr}");
     assert!(stderr.contains(ENV_MERCHANT_PRIVATE_KEY), "{stderr}");
-    assert!(stderr.contains(ENV_ALIPAY_PUBLIC_KEY), "{stderr}");
+    assert!(
+        !stderr.contains(ENV_ALIPAY_PUBLIC_KEY),
+        "平台公钥是 L2 前置,L0 缺项清单不得点名它:{stderr}"
+    );
     assert!(stderr.contains("修复"), "缺项给 ✗ 修复指引:{stderr}");
     assert!(
         !stdout.contains("[L1] 签名自测"),
@@ -548,7 +554,7 @@ fn default_without_real_stops_at_l1_with_locked_stdout() {
     assert!(stdout.contains("[L0]"), "{stdout}");
     assert!(stdout.contains("[L1]"), "{stdout}");
     assert!(!stdout.contains("[L2] 网关探针"), "缺省不得进 L2:{stdout}");
-    assert!(stdout.contains("签名→验签往返通过"), "{stdout}");
+    assert!(stdout.contains("签名→私钥派生公钥复核通过"), "{stdout}");
     assert!(stdout.contains("止步 L1"), "{stdout}");
     assert!(stdout.contains("--real"), "止步语要给下一步指引:{stdout}");
     // 零落账:缺省(无 --real)不碰探针账本。
@@ -641,10 +647,12 @@ fn l1_only_never_touches_transport_or_ledger() {
 }
 
 #[test]
-fn l1_mismatched_keypair_fails_closed_with_zero_network() {
-    let dir = temp_dir("l1-mismatch");
+fn l1_ignores_platform_public_key_even_when_mismatched() {
+    let dir = temp_dir("l1-no-platform");
     let keys_a = test_keys();
     let keys_b = test_keys();
+    // W-57 契约:L1 只消费商户私钥(自签 + 派生公钥复核),平台公钥槽位放一把
+    // 完全无关的公钥也不影响 L1——配对对象对不对由 L2 网关回答,不由本地槽位猜。
     let mut env = l1_env(&keys_a);
     env.set(SLOT_ALIPAY_ALIPAY_PUBLIC_KEY, &keys_b.alipay_public);
     let wal = dir.join("wal.jsonl");
@@ -653,22 +661,80 @@ fn l1_mismatched_keypair_fails_closed_with_zero_network() {
     let mut options = options(env, &wal, &evidence, false, false, Some(gateway.clone()));
     let mut confirmer = ScriptConfirmer::new(&[]);
 
-    let err = run_probe(&mut options, &mut confirmer).expect_err("配对不齐必须拒");
-    let message = failed_message(&err);
-    assert!(message.contains("L1 不过"), "{message}");
-    assert!(message.contains("同一对密钥"), "{message}");
-    assert!(message.contains("零网络"), "{message}");
-    // 零出网零落盘:自测失败发生在任何 IO 之前。
-    assert!(gateway.captured().is_empty(), "L1 失败绝不碰网关");
+    let outcome = run_probe(&mut options, &mut confirmer).expect("L1 应过(平台公钥不参与)");
+    assert_eq!(outcome.reached, "L1");
+    assert!(
+        gateway.captured().is_empty(),
+        "L1 绝不碰网关:{:?}",
+        gateway.captured()
+    );
     assert!(!wal.exists(), "{wal:?}");
-    assert!(!evidence.exists(), "失败零落盘:{evidence:?}");
+}
+
+#[test]
+fn l1_passes_with_merchant_key_alone() {
+    let dir = temp_dir("l1-private-only");
+    let keys = test_keys();
+    // W-57 契约:只设商户私钥(不设平台公钥)= L1 照样过——平台公钥是 L2 前置。
+    let mut env = ProbeEnv::default();
+    env.set(SLOT_ALIPAY_MERCHANT_PRIVATE_KEY, &keys.merchant_private);
+    let wal = dir.join("wal.jsonl");
+    let evidence = dir.join("evidence");
+    let mut options = options(env, &wal, &evidence, false, false, None);
+    let mut confirmer = ScriptConfirmer::new(&[]);
+
+    let outcome = run_probe(&mut options, &mut confirmer).expect("仅商户私钥 L1 应过");
+    assert_eq!(outcome.reached, "L1");
+    assert_eq!(
+        outcome.evidence.len(),
+        1,
+        "只有 L1 档:{:?}",
+        outcome.evidence
+    );
+    assert!(!wal.exists(), "L1 零落账:{wal:?}");
+}
+
+#[test]
+fn l2_missing_platform_public_key_fails_closed_before_confirm() {
+    let dir = temp_dir("l2-no-platform");
+    let keys = test_keys();
+    let wal = dir.join("probe-wal.jsonl");
+    let evidence = dir.join("evidence");
+    // L2 槽位齐但抽掉平台公钥:--real + 护栏都在,L2 门口 fail-closed(确认门与
+    // 网关调用之前),修复指引点名槽位。
+    let mut env = ProbeEnv::default();
+    env.set(SLOT_ALIPAY_MERCHANT_PRIVATE_KEY, &keys.merchant_private);
+    env.set(SLOT_ALIPAY_APP_ID, APP_ID);
+    env.set(SLOT_ALIPAY_ENDPOINT, MOCK_GATEWAY);
+    env.set(ENV_ALLOW_REAL_SPEND, "1");
+    let gateway = MockGateway::new(keys.alipay_side.clone(), &[]);
+    let mut options = options(env, &wal, &evidence, true, false, Some(gateway.clone()));
+    let mut confirmer = ScriptConfirmer::new(&[]);
+
+    let err = run_probe(&mut options, &mut confirmer).expect_err("缺平台公钥必须拒");
+    let message = failed_message(&err);
+    assert!(message.contains(SLOT_ALIPAY_ALIPAY_PUBLIC_KEY), "{message}");
+    assert!(message.contains("修复"), "{message}");
+    assert!(
+        message.contains("平台公钥不参与请求") || message.contains("验网关响应"),
+        "失败信息要讲清双钥模型:{message}"
+    );
+    assert!(
+        confirmer.prompts().is_empty(),
+        "拒在确认门之前:{:?}",
+        confirmer.prompts()
+    );
+    assert!(gateway.captured().is_empty(), "拒在网关调用之前");
+    assert!(!wal.exists(), "零落账:{wal:?}");
+    assert_eq!(evidence_files(&evidence).len(), 1, "只有 L1 档");
 }
 
 #[test]
 fn pem_wrapped_key_material_is_accepted_too() {
     let dir = temp_dir("l1-pem");
     let keys = test_keys();
-    let mut env = l1_env(&keys);
+    // W-57 起平台公钥在 L2 消费,PEM 外壳的公钥 parse 面随 L2 探针一并压住。
+    let mut env = l2_env(&keys, true);
     env.set(
         SLOT_ALIPAY_MERCHANT_PRIVATE_KEY,
         &wrap_pem("PRIVATE KEY", &keys.merchant_private),
@@ -677,17 +743,13 @@ fn pem_wrapped_key_material_is_accepted_too() {
         SLOT_ALIPAY_ALIPAY_PUBLIC_KEY,
         &wrap_pem("PUBLIC KEY", &keys.alipay_public),
     );
-    let mut options = options(
-        env,
-        &dir.join("wal.jsonl"),
-        &dir.join("evidence"),
-        false,
-        false,
-        None,
-    );
-    let mut confirmer = ScriptConfirmer::new(&[]);
+    let wal = dir.join("probe-wal.jsonl");
+    let evidence = dir.join("evidence");
+    let gateway = MockGateway::new(keys.alipay_side.clone(), &[Script::PrecreateOk]);
+    let mut options = options(env, &wal, &evidence, true, false, Some(gateway.clone()));
+    let mut confirmer = ScriptConfirmer::new(&[true]);
     let outcome = run_probe(&mut options, &mut confirmer).expect("PEM 形态应被收");
-    assert_eq!(outcome.reached, "L1");
+    assert_eq!(outcome.reached, "L2");
 }
 
 #[test]

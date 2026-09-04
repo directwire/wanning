@@ -10,8 +10,8 @@
 //! 只存在于本测试进程内存、绝不落仓绝不入 git、绝非真商户密钥。
 
 use wanning_demo::signing::{
-    canonical_notify_string, canonical_query, CanonicalError, MessageSigner, SignatureVerifier,
-    SigningError,
+    canonical_notify_string, canonical_query, CanonicalError, EnvRsaSigner, MessageSigner,
+    SignatureVerifier, SigningError,
 };
 
 // ---------------------------------------------------------------------------
@@ -256,6 +256,102 @@ fn rsa_signature_is_deterministic_for_same_message() {
 fn alg_name_is_pinned() {
     let (signer, _) = test_keypair();
     assert_eq!(signer.alg(), "RSA2");
+}
+
+// ---------------------------------------------------------------------------
+// W-57:EnvRsaSigner::self_verify —— L1 签名自测的验半边(私钥派生公钥复核)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn env_signer_self_verify_roundtrip_and_fail_closed() {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+    use rsa::pkcs8::EncodePrivateKey;
+
+    // 现场生成 → 导出 PKCS#8 DER → 裸 base64(env 注入的常见形态)→ EnvRsaSigner。
+    let private = {
+        use rand::rngs::OsRng;
+        rsa::RsaPrivateKey::new(&mut OsRng, 2048).expect("现场生成测试 RSA 密钥对")
+    };
+    let der = private.to_pkcs8_der().expect("导出 PKCS#8 DER");
+    let material = B64.encode(der.as_bytes());
+    let signer = EnvRsaSigner::from_material(&material).expect("裸 base64 DER 应被收");
+
+    let canonical = canonical_query(&[("out_trade_no", "20260904001"), ("total_amount", "0.01")])
+        .expect("规范化");
+    let signature = signer.sign(&canonical).expect("签名成功");
+
+    // 自己签的 → 派生公钥复核得过(ENV_MERCHANT_PRIVATE_KEY 槽位的 L1 契约)。
+    assert!(
+        signer.self_verify(&canonical, &signature),
+        "私钥签的报文必须被自己的派生公钥验开"
+    );
+
+    // 报文被改一个字符 → 拒。
+    let tampered = canonical.replace("0.01", "0.99");
+    assert!(
+        !signer.self_verify(&tampered, &signature),
+        "改过的报文必须拒"
+    );
+
+    // 别的私钥签的名 → 拒。
+    let other = {
+        use rand::rngs::OsRng;
+        let key = rsa::RsaPrivateKey::new(&mut OsRng, 2048).expect("现场生成");
+        EnvRsaSigner::from_material(&B64.encode(key.to_pkcs8_der().expect("导出").as_bytes()))
+            .expect("解析")
+    };
+    let wrong = other.sign(&canonical).expect("签名成功");
+    assert!(!signer.self_verify(&canonical, &wrong), "别人的签名必须拒");
+
+    // 垃圾字节 / 空签名 → false,不 panic。
+    assert!(!signer.self_verify(&canonical, b"not-a-signature"));
+    assert!(!signer.self_verify(&canonical, &[]));
+}
+
+#[test]
+fn env_signer_self_verify_never_mirrors_platform_key_semantics() {
+    // 契约钉死:平台支付宝公钥(验响应那把)在数学上验不开商户私钥的请求签名——
+    // 旧 L1 口径(拿平台公钥验自签报文)对任何正确部署都必然失败,W-57 已废。
+    // 这里用「两个独立密钥对」复刻该不可能性,防止口径回潮。
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+    use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+
+    use wanning_demo::signing::EnvRsaVerifier;
+
+    let merchant = {
+        use rand::rngs::OsRng;
+        rsa::RsaPrivateKey::new(&mut OsRng, 2048).expect("现场生成")
+    };
+    let platform = {
+        use rand::rngs::OsRng;
+        rsa::RsaPrivateKey::new(&mut OsRng, 2048).expect("现场生成")
+    };
+    let signer =
+        EnvRsaSigner::from_material(&B64.encode(merchant.to_pkcs8_der().expect("导出").as_bytes()))
+            .expect("解析");
+    let platform_verifier = EnvRsaVerifier::from_material(
+        &B64.encode(
+            platform
+                .to_public_key()
+                .to_public_key_der()
+                .expect("导出")
+                .as_bytes(),
+        ),
+    )
+    .expect("解析");
+
+    let canonical = canonical_query(&[("a", "1")]).expect("规范化");
+    let signature = signer.sign(&canonical).expect("签名成功");
+
+    // 商户私钥自己的派生公钥:验得过(新 L1)。
+    assert!(signer.self_verify(&canonical, &signature));
+    // 平台公钥:验不过(这正是 L2 验响应、绝不验请求的原因)。
+    assert!(
+        !platform_verifier.verify(&canonical, &signature),
+        "平台公钥验不开商户请求签名——旧 L1 口径不可回潮"
+    );
 }
 
 #[test]

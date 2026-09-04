@@ -9,8 +9,11 @@
 //! - **L0 环境齐套**:零网络,逐槽位报 已设/未设(值绝不回显),缺项给 ✗ 修复
 //!   指引,缺 L1 前置密钥就停在这里;
 //! - **L1 签名自测**:零网络——env 注入的商户私钥真签一笔 `alipay.trade.precreate`
-//!   自测报文(不碰真 app_id、不碰网关),再用支付宝公钥验回;密钥格式错误或
-//!   「私钥/公钥不是一对」当场现形,这是所有真实路径之前的免费保险;
+//!   自测报文(不碰真 app_id、不碰网关),再用**私钥派生公钥**复核;密钥格式
+//!   错误当场现形,这是所有真实路径之前的免费保险。W-57 口径修正:商户私钥签的
+//!   **请求**由支付宝用商户上传的应用公钥验,平台支付宝公钥只验**响应**——拿
+//!   平台公钥验请求签名在数学上不可能,故 L1 不再消费支付宝公钥槽位;密钥是否
+//!   为控制台绑定的那把 = L2 真网关的回答;
 //! - **L2 网关探针**:真网关,**零资金移动**——`alipay.trade.precreate`(当面付
 //!   预下单)只生成二维码,买家不扫码即不产生资金流,探针不扫码。回答的问题 =
 //!   **服务器认不认签名**(W-50「待实签」清单第一格);业务权限被拒也是已验签
@@ -93,9 +96,11 @@ const USAGE: &str = "wanning channel-test:渠道钥匙验证(L0→L3 分级阶�
 
 阶梯(绝不跳级):
   L0 环境齐套    零网络,缺项给 ✗ 修复指引(密钥值绝不回显)
-  L1 签名自测    零网络:env 商户私钥真签 + 支付宝公钥验回(不配对当场现形)
+  L1 签名自测    零网络:env 商户私钥真签 + 私钥派生公钥复核(密钥格式错当场现形;
+                商户私钥签的请求由支付宝用你上传的应用公钥验,平台公钥不参与请求)
   L2 网关探针    真网关零资金移动(alipay.trade.precreate 预下单,探针不扫码);
-                需要 --real + WANNING_ALLOW_REAL_SPEND=1 + TTY 交互确认
+                需要 --real + WANNING_ALLOW_REAL_SPEND=1 + TTY 交互确认 +
+                支付宝公钥槽位(平台侧那把,验网关响应签名用)
   L3 协议内扣款  真实扣款 0.01 元(alipay.trade.pay,协议内扣款,本人账户);
                 在 L2 之上追加 --real-spend + 专属确认
 
@@ -143,7 +148,7 @@ pub const UNSUPPORTED_CHANNELS: &[(&str, &str)] = &[
 pub const SLOT_ALIPAY_APP_ID: &str = "WANNING_ALIPAY_APP_ID";
 /// 商户应用私钥(签名槽位;W-52 env 注入位)。
 pub const SLOT_ALIPAY_MERCHANT_PRIVATE_KEY: &str = signing::ENV_MERCHANT_PRIVATE_KEY;
-/// 支付宝公钥(验签槽位;W-52 env 注入位)。
+/// 支付宝公钥(L2 验网关响应签名用;W-52 env 注入位,W-57 起不再作 L1 前置)。
 pub const SLOT_ALIPAY_ALIPAY_PUBLIC_KEY: &str = signing::ENV_ALIPAY_PUBLIC_KEY;
 /// 用户签约协议号(L3 协议内扣款凭证;没有协议号的扣款 = 裸转账,绝不发)。
 pub const SLOT_ALIPAY_AGREEMENT_NO: &str = "WANNING_ALIPAY_AGREEMENT_NO";
@@ -168,8 +173,9 @@ const ALIPAY_SLOT_TABLE: [SlotRow; 11] = [
     },
     SlotRow {
         slot: SLOT_ALIPAY_ALIPAY_PUBLIC_KEY,
-        level: "L1",
-        why: "支付宝公钥(应用详情页那把平台公钥,不是你自己的应用公钥)",
+        level: "L2",
+        why: "支付宝公钥(平台侧那把;L2 验网关响应签名用——商户私钥签的请求由\
+              支付宝用你上传的应用公钥验,平台公钥不参与请求)",
     },
     SlotRow {
         slot: SLOT_ALIPAY_APP_ID,
@@ -479,8 +485,8 @@ fn run_alipay_ladder(
         for row in &missing_l1 {
             eprintln!("  ✗ {} 未设 —— {}", row.slot, row.why);
         }
-        eprintln!("  修复:把密钥材料放进上面两个环境变量后重跑(应用私钥用开放平台");
-        eprintln!("  密钥工具生成;支付宝公钥在应用详情页)。");
+        eprintln!("  修复:把密钥材料放进对应环境变量后重跑(应用私钥用开放平台密钥工具");
+        eprintln!("  生成;支付宝公钥属 L2,此处不查)。");
         eprintln!("  纪律:密钥绝不写进配置文件、绝不作为命令行参数(进程列表可见)、");
         eprintln!("  绝不进取证档;只从环境变量现取现用。");
         return Err(ChannelTestError::Failed("L0 未过:渠道密钥未齐".to_string()));
@@ -489,7 +495,7 @@ fn run_alipay_ladder(
     let now = SystemClock.now();
     // ── L1:签名自测(零网络) ────────────────────────────────────────────
     println!();
-    println!("[L1] 签名自测(零网络):自签 alipay.trade.precreate 自测报文 → 用支付宝公钥验回");
+    println!("[L1] 签名自测(零网络):自签 alipay.trade.precreate 自测报文 → 私钥派生公钥复核");
     let signer =
         EnvRsaSigner::from_material(env.get(SLOT_ALIPAY_MERCHANT_PRIVATE_KEY).expect("L0 已查"))
             .map_err(|e| {
@@ -497,15 +503,7 @@ fn run_alipay_ladder(
                     "L1 失败:商户私钥解析不过,拒绝前进(不碰网关): {e}"
                 ))
             })?;
-    let verifier =
-        EnvRsaVerifier::from_material(env.get(SLOT_ALIPAY_ALIPAY_PUBLIC_KEY).expect("L0 已查"))
-            .map_err(|e| {
-                ChannelTestError::Failed(format!(
-                    "L1 失败:支付宝公钥解析不过,拒绝前进(不碰网关): {e}"
-                ))
-            })?;
     println!("  ✅ 商户私钥解析成功(算法 RSA2 = SHA256WithRSA)");
-    println!("  ✅ 支付宝公钥解析成功");
 
     // 自测报文:确定性身份(不碰真 app_id、不碰网关),真签名。
     let selftest_cfg = alipay::AlipayRealConfig {
@@ -525,7 +523,9 @@ fn run_alipay_ladder(
     )
     .map_err(|e| ChannelTestError::Failed(format!("L1 失败:自测报文构建被拒(不碰网关): {e}")))?;
     // 复算待签串:从报文拆回参数对(percent 解码)→ 剔除 sign → 官方规则规范化 →
-    // 用支付宝公钥验自己的签名。能验过 = 「私钥 ↔ 公钥」配对自洽。
+    // 用私钥派生的公钥复核自己的签名。能复核过 = 密钥材料内部自洽、RSA2 可用;
+    // 密钥是否为控制台绑定的那把,L1 答不了(请求由支付宝用上传的应用公钥验,
+    // 平台公钥只验响应)——那是 L2 真网关的回答。
     // 签名覆盖面 = 平台参数(query)+ biz_content(body)——**两边都要拆回**,只拆
     // query 会漏掉 biz_content,待签串与签名覆盖面不一致,自测永远验不过。
     let mut pairs = alipay::query_pairs_of(&outgoing.url);
@@ -549,18 +549,16 @@ fn run_alipay_ladder(
         .collect();
     let canonical = canonical_query(&rest)
         .map_err(|e| ChannelTestError::Failed(format!("L1 失败:待签串复算被拒: {e}")))?;
-    if !verifier.verify(&canonical, &signature) {
+    if !signer.self_verify(&canonical, &signature) {
         return Err(ChannelTestError::Failed(
-            "L1 不过:用支付宝公钥验自己的签名没验过。最常见原因 = 两个 env 里放的不是\
-             同一对密钥(支付宝公钥必须是平台侧那把,不是你自己的应用公钥)。请核对后\
-             重跑;全程零网络,网关未被触碰。"
+            "L1 不过:签名 → 私钥派生公钥复核没验过(同一把私钥签的报文自己的公钥都\
+             验不开 = 密钥材料内部自洽性错误,不应发生)。密钥材料已拒用;全程零网络,\
+             网关未被触碰。"
                 .to_string(),
         ));
     }
-    println!("  ✅ 签名→验签往返通过(out_trade_no={out_trade_no};报文零出网)");
-    println!(
-        "  L1 过:密钥可用且「商户私钥 ↔ 支付宝公钥」配对自洽。这不证明服务器认——L2 才见真网关。"
-    );
+    println!("  ✅ 签名→私钥派生公钥复核通过(out_trade_no={out_trade_no};报文零出网)");
+    println!("  L1 过:商户私钥可用且能签 RSA2。服务器认不认这把密钥 = L2 真网关的回答。");
 
     // L1 取证档(脱敏:只有槽位名与待签串,无任何密钥材料)。
     let l1_evidence = format!(
@@ -573,7 +571,7 @@ fn run_alipay_ladder(
          out_trade_no: {out_trade_no}\n\
          method: alipay.trade.precreate(自测报文,gateway=selftest.invalid,零出网)\n\
          待签串(无密钥材料): {canonical}\n\
-         结论: 签名→验签往返通过\n",
+         结论: 签名→私钥派生公钥复核通过\n",
         format_utc(now),
         options.channel,
         slash(&options.wal),
@@ -586,7 +584,8 @@ fn run_alipay_ladder(
         println!("止步 L1(缺省不带 --real = 只做零网络自测)。");
         println!(
             "下一步(L2 真网关探针,零资金移动)需要同时满足:① --real 显式;\
-             ② env WANNING_ALLOW_REAL_SPEND=1;③ 交互终端亲手确认。缺一即拒。"
+             ② env WANNING_ALLOW_REAL_SPEND=1;③ 交互终端亲手确认;\
+             ④ 支付宝公钥槽位已设(平台侧那把,验网关响应用)。缺一即拒。"
         );
         return Ok(ProbeOutcome {
             reached: "L1",
@@ -609,6 +608,23 @@ fn run_alipay_ladder(
             "缺少 {SLOT_ALIPAY_APP_ID}:支付宝开放平台应用 app_id。✗ 修复:设好 app_id 后重跑。"
         )));
     }
+    // W-57:支付宝公钥是 L2 前置(验网关响应签名用),不是 L1 前置——缺失/解析
+    // 不过都在 L2 门口 fail-closed,确认门与网关调用之前。
+    if !env.is_set(SLOT_ALIPAY_ALIPAY_PUBLIC_KEY) {
+        return Err(ChannelTestError::Failed(format!(
+            "缺少 {SLOT_ALIPAY_ALIPAY_PUBLIC_KEY}:支付宝公钥(平台侧那把,应用详情页\
+             显示;L2 验网关响应签名用——商户私钥签的请求由支付宝用你上传的应用公钥验,\
+             平台公钥不参与请求)。✗ 修复:设好后重跑。"
+        )));
+    }
+    let verifier =
+        EnvRsaVerifier::from_material(env.get(SLOT_ALIPAY_ALIPAY_PUBLIC_KEY).expect("上方已查"))
+            .map_err(|e| {
+                ChannelTestError::Failed(format!(
+                    "L2 失败:支付宝公钥解析不过,拒绝前进(不碰网关): {e}"
+                ))
+            })?;
+    println!("  ✅ 支付宝公钥解析成功(验网关响应签名用)");
     let snapshot = env.guard_snapshot();
     let mut probe_backend = AlipayBackend::from_snapshot_probe(&snapshot)
         .map_err(|e| ChannelTestError::Failed(format!("L2 配置构建被拒(fail-closed): {e}")))?;

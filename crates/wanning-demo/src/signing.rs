@@ -55,10 +55,11 @@
 //! 入账」前置门)。实现两档:
 //!
 //! - **env 注入真密钥**(W-52,[`EnvRsaSigner`]/[`EnvRsaVerifier`]):channel-test
-//!   L1「签名自测」与 L2/L3 真实路径用。密钥材料只在构造瞬间解析成
-//!   [`rsa::RsaPrivateKey`]/[`rsa::RsaPublicKey`],原文不存、`Debug` 手写不打印
-//!   任何材料;接受 PKCS#8 PEM / PKCS#1 PEM / 裸 base64 DER 三种形态(开放平台
-//!   密钥工具与控制台常见的复制形态,零第三方工具)。
+//!   L1「签名自测」(W-57 起 = 真签 + [`EnvRsaSigner::self_verify`] 私钥派生
+//!   公钥复核,平台公钥槽位改挂 L2)与 L2/L3 真实路径用。密钥材料只在构造瞬间
+//!   解析成 [`rsa::RsaPrivateKey`]/[`rsa::RsaPublicKey`],原文不存、`Debug` 手写
+//!   不打印任何材料;接受 PKCS#8 PEM / PKCS#1 PEM / 裸 base64 DER 三种形态
+//!   (开放平台密钥工具与控制台常见的复制形态,零第三方工具)。
 //! - **测试面**:dev-only 的 `rand` 现场生成 2048 位测试密钥对(自生成自销毁,
 //!   绝不真商户密钥,绝不落仓)。
 
@@ -208,7 +209,9 @@ pub trait SignatureVerifier {
 pub const ENV_MERCHANT_PRIVATE_KEY: &str = "WANNING_ALIPAY_MERCHANT_PRIVATE_KEY";
 
 /// 支付宝公钥 env 注入位(W-52):`WANNING_ALIPAY_ALIPAY_PUBLIC_KEY`(对应官方
-/// 字段名 `alipay_public_key`)。L1 用它验自签报文,L2/L3 用它验同步响应/异步通知。
+/// 字段名 `alipay_public_key`)。L2/L3 用它验同步响应/异步通知。**它验不了请求**:
+/// 商户私钥签的请求由支付宝用商户上传的**应用公钥**验——W-57 起平台公钥不再是
+/// L1 前置(L1 自测用 [`EnvRsaSigner::self_verify`] 私钥派生公钥复核,不消费本槽位)。
 pub const ENV_ALIPAY_PUBLIC_KEY: &str = "WANNING_ALIPAY_ALIPAY_PUBLIC_KEY";
 
 /// env 注入的商户应用私钥 → RSA2(SHA256WithRSA [公开文档直核 057k53 步骤3])
@@ -228,6 +231,20 @@ impl EnvRsaSigner {
         Ok(Self {
             key: parse_private_key(material)?,
         })
+    }
+
+    /// 私钥派生公钥复核自己的签名(W-57,L1 签名自测的验半边):用本私钥派生出
+    /// 的公钥验回刚签出的签名。能复核过 = 密钥材料内部自洽、RSA2 可用——这是
+    /// L1 能回答的全部;**密钥是不是控制台绑定的那把,L1 答不了,L2 真网关回答**
+    /// (商户私钥签的请求由支付宝用上传的应用公钥验,平台支付宝公钥只验响应,
+    /// 拿平台公钥验请求签名在数学上不可能——旧 L1 口径的错误即在此)。
+    pub fn self_verify(&self, canonical: &str, signature: &[u8]) -> bool {
+        let verifying_key =
+            rsa::pkcs1v15::VerifyingKey::<rsa::sha2::Sha256>::new(self.key.to_public_key());
+        let Ok(signature) = rsa::pkcs1v15::Signature::try_from(signature) else {
+            return false;
+        };
+        rsa::signature::Verifier::verify(&verifying_key, canonical.as_bytes(), &signature).is_ok()
     }
 }
 
