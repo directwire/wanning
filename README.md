@@ -266,8 +266,10 @@ cargo run -p wanning-demo --bin wanning-anchor-verify -- \
 平台接入方,与个人用户无关。通道半边的两块已备:
 
 - **官方报文模板**(W-50):支付宝签名/验签/网关/字段全按公开文档直核填实
-  (协议内扣款没有协议号绝不发报文,fail-closed 到构建层;调研在档);
-  开户后只剩「实签验证」一步。
+  (协议内扣款没有协议号绝不发报文,fail-closed 到构建层;调研在档)。
+  **签名管线已实测**:规范化/签名/验签契约逐条有测试钉死,L1 签名自测
+  2026-09-04 本地真钥实跑绿(零网络);「网关认不认签名」已工具化——
+  真商户密钥就位后 `channel-test --real` 一条命令即验,不再是待办台阶。
 - **渠道钥匙验证**(`wanning channel-test`,W-52):所有者在支付平台侧的商户密钥
   能不能用,一条命令分级验证,**绝不跳级**:
 
@@ -361,7 +363,7 @@ gate.self_check()?;                        // 验链+回放对账,三条口径�
 
 | 阶段 | 交付 | 状态 |
 |---|---|---|
-| P0 | CLI 闭环 demo:GLM 决策 + 闸 + 支付宝免密/京东开放平台真实小额下单(四卖点实测) | **离线闭环完成**(四卖点+回放对账+护栏/adapter mock 全测试;**预算策略层落地** W-27:速率/类目/商户/时段四维确定性策略;**性能基线** W-30:判定 ~1.2M/s、WAL 追加 ~0.33M 行/s、回放 ~0.42M 行/s,`docs/benchmarks.md`);真实小额下单待账户开通——**支付宝官方报文模板已按公开文档填实**(W-50:签名/验签/网关/字段全直核 + ANAI 实战双源交叉,调研在档;开户后只剩「实签验证」一步);**京东 VOP 公开面复核**(W-50:支付 4 接口全字段/错误码表直核,签名算法公开面查不到,保持契约占位,调研在档含开户后人工核清单)。**产品化首砖+W-43a/W-43b**:统一
+| P0 | CLI 闭环 demo:GLM 决策 + 闸 + 支付宝免密/京东开放平台真实小额下单(四卖点实测) | **离线闭环完成**(四卖点+回放对账+护栏/adapter mock 全测试;**预算策略层落地** W-27:速率/类目/商户/时段四维确定性策略;**性能基线** W-30:判定 ~1.2M/s、WAL 追加 ~0.33M 行/s、回放 ~0.42M 行/s,`docs/benchmarks.md`);真实小额下单待账户开通——**支付宝官方报文模板已按公开文档填实**(W-50:签名/验签/网关/字段全直核 + ANAI 实战双源交叉,调研在档;签名管线已实测——L1 签名自测 2026-09-04 本地真钥实跑绿,网关实证工具化=`channel-test --real` 一条命令即验);**京东 VOP 公开面复核**(W-50:支付 4 接口全字段/错误码表直核,签名算法公开面查不到,保持契约占位,调研在档含开户后人工核清单)。**产品化首砖+W-43a/W-43b**:统一
 CLI 入口 `wanning`(init/audit/demo/anchor-verify/ui,默认账本 ~/.wanning)、
 本地只读仪表盘 `wanning ui` |
 | P1 | 闸做成 **MCP server**——Claude Code / Kimi / Trae 等真实平台真插 | 骨架+协议边界加固完成;**Claude Code 真插实测通过**(2026-09-02,W-19);**Codex 配置面免登录实测 + 插件页落地**(W-35,`docs/plugins/codex.md`,生成的 TOML 已实证可启动闸;会话级待 OpenAI 登录);**Kimi Code CLI 挂法+闸往返本机实测**(W-40:0.39.1 无 `kimi mcp` 子命令→`.kimi-code/mcp.json` 挂法,隔离 `KIMI_CODE_HOME` 下真二进制完成 allow/replay/over_budget 三判定落 WAL,模型侧本地 mock,真实模型会话复证待所有者放行烧额度——登录凭证 2026-08-30 已在档,`kimi login` 大概率可省(W-42 修正),`docs/plugins/kimi.md`);**WorkBuddy 调研破冰**(W-37:腾讯 AI 办公工作台,支持 MCP,`.workbuddy/mcp.json`,生成器已入矩阵,真插待桌面端);Trae 实测被 GUI 挡;**DeepSeek Harness 接入**(W-44:Cordis overlay patch 生成器分支 + 插件页,本机 dsh 0.1.0-rc.7 `--dump-config --patch` 实测接受,会话级待所有者放行);**OpenClaw + Hermes 接入**(W-45:两宿主原生支持 MCP,`openclaw mcp set`/`hermes mcp add` 生成器分支 + 插件页,真宿主隔离实测——hermes **全链路**:挂载 2/2 工具发现 + one-shot agent 回合经 `tool_call` 间接层 → allow 400 落 WAL、同 nonce replay 拒;openclaw 配置面 + mock 模型注册绿,agent 回合 **W-47 收口**:静默退出根因查明(缺 `-m`/缺会话选择器/cwd 扫描税),隔离 mock 真回合工具现身 `wanning__*`、allow/replay 落 WAL、链连续);**八平台配置生成器**(`wanning-init`,W-36/W-44/W-45);**三命令流收口**(W-51:`init --install` 直写宿主配置消手动贴 + `wanning doctor` 六项体检消「通没通自己试」,装完即用);**人在环待支付 = 第一形态**(W-53:支付形态分层 `pending_pay`(默认)/`auto_debit`/`manual`,默认档闸放行即开待支付单,五段事件链全落 WAL 可逐段回放,三钉(金额一致/幂等/TTL)fail-closed,确认只在 CLI 人工面 `wanning confirm`,MCP 工具面连 confirm 字样都零命中) |
